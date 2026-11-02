@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>门诊检查路线规划</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="logo">✚</div>
+      <div>
+        <h1>门诊检查路线规划</h1>
+        <p id="subtle">正在加载…</p>
+      </div>
+    </div>
+    <label class="switch"><input type="checkbox" id="fasting" checked><i></i>患者已空腹</label>
+    <button class="btn" id="demo">载入示例</button>
+    <button class="btn" id="clear">清空</button>
+    <button class="btn primary" id="run" disabled>生成最优路线</button>
+  </div>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="panel-head">
+      <h2>科室候检情况</h2>
+      <span class="hint" id="deptHint">正在连接叫号系统…</span>
+      <span class="spacer"></span>
+      <span class="live" id="live" title="点击暂停 / 继续实时刷新"><i></i><span id="liveText">实时</span></span>
+    </div>
+    <div class="dept-row" id="depts"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>选择要做的检查</h2>
+      <span class="hint">点一下即取号；选完点右上角「生成最优路线」，带依赖的项目会自动补齐前置</span>
+      <span class="spacer"></span>
+      <span class="hint" id="count">已选 0 项</span>
+    </div>
+    <div class="exam-grid" id="exams"></div>
+  </section>
+
+  <section class="panel" id="ticketPanel" style="display:none">
+    <div class="panel-head">
+      <h2>已取号</h2>
+      <span class="hint">点检查项目即到对应科室取号；同科室共用一个号，一次到场做多项</span>
+      <span class="spacer"></span>
+      <span class="hint" id="ticketCount"></span>
+    </div>
+    <div class="ticket-grid" id="tickets"></div>
+  </section>
+
+  <section class="panel result" id="result"></section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

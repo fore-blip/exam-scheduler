@@ -1,0 +1,19 @@
+[Unit]
+Description=Exam Scheduler · 检查路线规划后端
+Documentation=https://github.com/fore-blip/exam-scheduler
+After=network.target
+
+[Service]
+Type=simple
+User=examsvc
+Group=examsvc
+WorkingDirectory=/opt/exam-scheduler
+ExecStart=/usr/bin/python3 -m backend.app.server --port 8765 --queue-api http://127.0.0.1:9000
+Restart=always
+RestartSec=3
+
+# 只监听回环，外部一律经 nginx 进来
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
