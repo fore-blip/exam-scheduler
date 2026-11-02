@@ -28,8 +28,8 @@
 需要 Python 3.9+，无需安装任何依赖。
 
 ```bash
-git clone <repo-url>
-cd exam_scheduler
+git clone https://github.com/fore-blip/exam-scheduler.git
+cd exam-scheduler
 ```
 
 开两个终端（或两个后台进程）：
