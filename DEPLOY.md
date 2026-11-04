@@ -101,12 +101,35 @@ nginx -t && systemctl reload nginx      # 改了 nginx 配置
 
 ## 四、更新代码
 
-服务器上就是普通 git 仓库，拉取即可：
+**当前部署方式：直接同步提交（不经过 GitHub）。** 服务器上的仓库比远程多两个提交，
+是因为部署时 GitHub 不可达，改用 git bundle 传输。所以**不要直接 `git pull`**，会提示
+`Already up to date` 或产生分叉。
+
+正确做法（在开发机执行）：
+
+```bash
+# 1) 提交本地改动并打成一个包
+cd exam_scheduler
+git add -A && git commit -m "描述改动"
+git bundle create /tmp/es.bundle main
+
+# 2) 传到服务器并快进到该提交
+scp /tmp/es.bundle <server>:/tmp/es.bundle
+ssh <server> "cd /opt/exam-scheduler && git fetch -q /tmp/es.bundle main \
+  && git reset --hard FETCH_HEAD && rm -f /tmp/es.bundle \
+  && chown -R examsvc:examsvc /opt/exam-scheduler"
+
+# 3) 重启对应服务
+ssh <server> "systemctl restart exam-scheduler"
+```
+
+这条链路的好处是两边的 commit 哈希完全一致，工作区保持干净。等 GitHub 恢复后，
+在开发机 `git push` 一次，服务器就能恢复成普通的 `git pull` 模式：
 
 ```bash
 cd /opt/exam-scheduler
-git pull
-systemctl restart exam-scheduler
+git fetch origin && git reset --hard origin/main      # 首次对齐
+git pull                                              # 之后照常
 ```
 
 改了哪部分就重启哪个服务：
