@@ -680,10 +680,15 @@ function renderResult(d) {
     if (s.type === "svc") {
       style += ";background:" + (DEPT_COLOR[s.dept] || "#8899AA");
     }
-    // 窄段放不下名字时退化为步骤序号，与下方列表一一对应，避免显示成"血…"
-    const label = s.type === "svc"
-      ? (pct >= 7 ? s.label : (s.idx ? String(s.idx) : ""))
-      : (pct >= 7 ? s.label : "");
+    // 每个检查段都带步骤序号：
+    //   够宽  → 「1.肺功能」，与下方列表的编号对得上
+    //   放不下 → 只留序号「2」，避免截断成「2.肺…」
+    let label = "";
+    if (s.type === "svc") {
+      if (s.idx) label = pct >= 9 ? s.idx + "." + s.label : String(s.idx);
+    } else {
+      label = pct >= 7 ? s.label : "";
+    }
     return '<div class="seg ' + s.type + '" style="' + style + '" title="' +
       esc(s.label) + " " + Math.round(s.m) + ' 分钟">' +
       (label ? "<span>" + esc(label) + "</span>" : "") + "</div>";
