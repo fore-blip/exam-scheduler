@@ -285,6 +285,34 @@ class TestTicketBlock(unittest.TestCase):
         self.assertEqual(plan.block_split, 2)
 
 
+class TestTicketPrereqGate(unittest.TestCase):
+    """挂号强制顺序：前置没挂号，就不能挂依赖它的项目。"""
+
+    def setUp(self):
+        from backend.app import prescriptions
+        prescriptions.reset()
+        self.rx = prescriptions
+        prescriptions.issue("P001", ["CBC", "BIO", "URINE"], "测试医生", dept_code="lab")
+
+    def tearDown(self):
+        self.rx.reset()
+
+    def test_missing_prerequisites(self):
+        self.assertEqual(self.rx.missing_prerequisites("P001", ["BIO"]), [["BIO", "CBC"]])
+        self.assertEqual(self.rx.missing_prerequisites("P001", ["CBC", "BIO"]), [])
+        self.assertEqual(self.rx.missing_prerequisites("P001", ["URINE"]), [])
+        # 前置已经挂过号 → 不再要求
+        self.rx.take_tickets("P001", ["CBC"])
+        self.assertEqual(self.rx.missing_prerequisites("P001", ["BIO"]), [])
+
+    def test_take_tickets_rejects_missing_prereq(self):
+        with self.assertRaises(ValueError):
+            self.rx.take_tickets("P001", ["BIO"])
+        # 前置一起挂号则放行
+        res = self.rx.take_tickets("P001", ["CBC", "BIO"])
+        self.assertEqual([x["code"] for x in res["issued"]], ["CBC", "BIO"])
+
+
 class TestGreedyCanFail(unittest.TestCase):
     def test_greedy_hits_window_optimal_does_not(self):
         """构造反例：最短等待优先会踩时间窗，最优解不会。"""

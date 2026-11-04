@@ -508,6 +508,12 @@ function renderTicketList() {
   }
 
   const nextCode = nextRecommended();
+  const takenSet = new Set(exams.filter((e) => e.taken).map((e) => e.code));
+  const selSet = new Set(ticketSelected);
+  // 前置还没挂、也没在本次选择里 → 这一项锁住，必须先挂前置
+  const openReq = (e) => (e.requires_open || []).filter((c) => !takenSet.has(c) && !selSet.has(c));
+  const nameOf = (c) => (BY_CODE[c] || {}).name || c;
+
   box.innerHTML = exams.map((e) => {
     const color = DEPT_COLOR[e.department] || "#8899AA";
     const dp = `<span class="dp"><i class="dot" style="background:${color}"></i>${esc(e.department)}</span>`;
@@ -522,17 +528,21 @@ function renderTicketList() {
       </div>`;
     }
     const on = ticketSelected.includes(e.code);
+    const missing = openReq(e);
+    const locked = missing.length > 0;
     const now = (e.next_ticket == null) ? "–" : e.next_ticket;
     const eta = (e.call_eta == null) ? "" : `（约 ${Math.round(e.call_eta)} 分后叫到）`;
-    return `<button class="tk-row ${on ? "on" : ""}" data-code="${e.code}">
+    return `<button class="tk-row ${on ? "on" : ""}${locked ? " locked" : ""}" data-code="${e.code}">
       <div class="tk-ord">${e.order || "·"}</div>
       <div class="tk-main">
         <div class="tk-name">${esc(e.name)}${dp}${e.code === nextCode ? '<span class="next-tag">建议先挂</span>' : ""}</div>
-        <div class="tk-meta">
+        ${locked
+          ? `<div class="tk-meta tk-lock">先挂：${missing.map((c) => esc(nameOf(c))).join("、")}，才能挂这一项</div>`
+          : `<div class="tk-meta">
           当前叫到 <b>${e.serving_no == null ? "–" : e.serving_no}</b> 号 ·
           排队 <b>${e.queue_length}</b> 人 / 约 ${Math.round(e.wait_minutes)} 分 ·
           现在取号≈<b>${now}</b> 号${eta}
-        </div>
+        </div>`}
       </div>
       <span class="tk-tick"></span>
     </button>`;
@@ -541,9 +551,31 @@ function renderTicketList() {
   box.querySelectorAll("button[data-code]").forEach((el) => {
     el.onclick = () => {
       const c = el.dataset.code;
+      const e = exams.find((x) => x.code === c);
       const i = ticketSelected.indexOf(c);
-      if (i >= 0) ticketSelected.splice(i, 1);
-      else ticketSelected.push(c);          // 记录点击先后，这就是挂号顺序
+      if (i >= 0) {
+        // 取消这一项时，依赖它的已选项一并取消，保证选择始终合法
+        ticketSelected.splice(i, 1);
+        const dropped = [];
+        ticketSelected = ticketSelected.filter((x) => {
+          const it = exams.find((y) => y.code === x);
+          if (it && (it.requires_open || []).includes(c)) {
+            dropped.push(nameOf(x));
+            return false;
+          }
+          return true;
+        });
+        if (dropped.length) {
+          toast(`已取消「${nameOf(c)}」，${dropped.join("、")} 依赖它，一并取消`);
+        }
+      } else {
+        const missing = openReq(e || {});
+        if (missing.length) {
+          toast(`请先挂 ${missing.map(nameOf).join("、")}，再挂「${(e || {}).name || c}」`);
+          return;
+        }
+        ticketSelected.push(c);          // 记录点击先后，这就是挂号顺序
+      }
       renderTicketList();
     };
   });

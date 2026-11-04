@@ -233,6 +233,8 @@ def build_tickets_payload(patient_id: str) -> Dict[str, Any]:
     catalog = rules_mod.build_catalog()
     states = data_source.get_snapshot(data_source.SNAPSHOT_TIME)
     taken_map = patient.get("tickets") or {}
+    deps = rules_mod.build_dependencies()
+    plan_items = set(prescriptions.items_of(patient_id))
 
     exams: List[Dict[str, Any]] = []
     for code in prescriptions.items_of(patient_id):
@@ -247,6 +249,11 @@ def build_tickets_payload(patient_id: str) -> Dict[str, Any]:
         if (st and next_ticket is not None and st.serving_no is not None
                 and st.service_minutes):
             call_eta = round((next_ticket - st.serving_no) * st.service_minutes, 1)
+        # 还没挂号的前置：必须先挂它们才能挂这一项（挂号页据此锁定选择）
+        requires = [
+            d.before for d in deps
+            if d.after == code and d.before in plan_items and d.before != code
+        ]
         exams.append({
             "code": code,
             "name": exam.name,
@@ -260,6 +267,8 @@ def build_tickets_payload(patient_id: str) -> Dict[str, Any]:
             "call_eta": call_eta,
             "ticket": int(taken) if taken is not None else None,
             "taken": taken is not None,
+            "requires": requires,
+            "requires_open": [c for c in requires if c not in taken_map],
             "order": (order.index(code) + 1) if code in order else None,
         })
 

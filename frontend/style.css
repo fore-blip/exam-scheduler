@@ -425,6 +425,13 @@
   .tk-row.on{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 0 0 1px var(--accent) inset}
   .tk-row.done{background:#F6F8FA;cursor:default;opacity:.85}
   .tk-row.done:hover{border-color:var(--line);background:#F6F8FA}
+  /* 前置没挂号时锁住：必须先挂前置项 */
+  .tk-row.locked{opacity:.62;cursor:not-allowed}
+  .tk-row.locked:hover{border-color:var(--line);background:#FBFCFD}
+  .tk-row.locked .tk-ord{background:#E3E8EF;color:#8A96A3}
+  .tk-row.locked .tk-tick::after{content:"";width:12px;height:2px;border-radius:1px;background:#B9C2CE}
+  .tk-lock{color:#B45309}
+  .tk-lock b{color:#92400E}
 
   .tk-ord{
     flex:0 0 30px;height:30px;border-radius:9px;background:#EEF2F7;color:#5A6B7F;

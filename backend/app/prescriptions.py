@@ -184,6 +184,26 @@ def remaining_items(patient_id: str) -> List[str]:
     return [c for c in rx.items if c not in p.tickets]
 
 
+def missing_prerequisites(patient_id: str, items: List[str]) -> List[List[str]]:
+    """要取号的项目里，哪些还缺前置没挂号（前置也不在本次 items 里）。
+
+    返回 [[缺前置的项目编码, 前置编码, ...], ...]，空列表表示合法。
+    这是「强制先挂前置」的服务端闸门：即使前端被绕过，这里也会拦下来。
+    """
+    p = _PATIENTS.get(patient_id)
+    if p is None:
+        raise KeyError(f"未知患者：{patient_id}")
+    plan = set(items_of(patient_id))
+    chosen = {str(c) for c in items}
+    taken = set(p.tickets)
+    missing: Dict[str, set] = {}
+    for dep in rules.build_dependencies():
+        if dep.after in chosen and dep.after in plan and dep.before in plan:
+            if dep.before not in taken and dep.before not in chosen:
+                missing.setdefault(dep.after, set()).add(dep.before)
+    return [[after, *sorted(pre)] for after, pre in missing.items()]
+
+
 def take_tickets(patient_id: str, items: List[str]) -> Dict[str, object]:
     """按给定顺序为若干检查项目取号——每个项目一个号。
 
@@ -193,6 +213,16 @@ def take_tickets(patient_id: str, items: List[str]) -> Dict[str, object]:
     p = _PATIENTS.get(patient_id)
     if p is None:
         raise KeyError(f"未知患者：{patient_id}")
+
+    problems = missing_prerequisites(patient_id, items)
+    if problems:
+        catalog = rules.build_catalog()
+        detail = "；".join(
+            f"「{catalog[row[0]].name}」必须先挂 " +
+            "、".join(f"「{catalog[c].name}」" for c in row[1:])
+            for row in problems if row[0] in catalog
+        )
+        raise ValueError(f"{detail}，请先选择前置检查项目")
 
     catalog = rules.build_catalog()
     allowed = set(remaining_items(patient_id))
