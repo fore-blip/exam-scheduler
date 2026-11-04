@@ -361,13 +361,13 @@ async function run() {
 function segmentsOf(d) {
   const segs = [];
   let cursor = 0;
-  d.steps.forEach((s) => {
+  d.steps.forEach((s, i) => {
     const travel = s.travel_minutes || 0;
     if (travel > 0.01) segs.push({ type: "travel", m: travel, label: "移动" });
     const idle = s.arrive_at - cursor - travel;
     if (idle > 0.01) segs.push({ type: "idle", m: idle, label: "等待结果" });
     if (s.wait_minutes > 0.01) segs.push({ type: "wait", m: s.wait_minutes, label: "排队" });
-    segs.push({ type: "svc", m: s.service_minutes, label: s.name, dept: s.department });
+    segs.push({ type: "svc", m: s.service_minutes, label: s.name, dept: s.department, idx: i + 1 });
     cursor = s.finish_at;
   });
   return segs;
@@ -395,7 +395,10 @@ function renderResult(d) {
     if (s.type === "svc") {
       style += ";background:" + (DEPT_COLOR[s.dept] || "#8899AA");
     }
-    const label = s.type === "svc" ? s.label : (pct >= 7 ? s.label : "");
+    // 窄段放不下名字时退化为步骤序号，与下方列表一一对应，避免显示成"血…"
+    const label = s.type === "svc"
+      ? (pct >= 7 ? s.label : (s.idx ? String(s.idx) : ""))
+      : (pct >= 7 ? s.label : "");
     return '<div class="seg ' + s.type + '" style="' + style + '" title="' +
       esc(s.label) + " " + Math.round(s.m) + ' 分钟">' +
       (label ? "<span>" + esc(label) + "</span>" : "") + "</div>";
