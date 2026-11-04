@@ -20,6 +20,7 @@ from typing import Any, Dict
 from urllib.parse import urlparse
 
 from . import data_source
+from . import prescriptions
 from . import rules as rules_mod
 from . import service
 
@@ -112,8 +113,25 @@ def build_catalog_payload() -> Dict[str, Any]:
 
 
 def build_recommend_payload(body: Dict[str, Any]) -> Dict[str, Any]:
+    patient_id = str(body.get("patient_id") or "").strip()
     codes = [str(c) for c in (body.get("codes") or [])]
     fasting = bool(body.get("fasting", True))
+
+    # 用户端只按医嘱执行，不自选项目
+    if patient_id:
+        rx = prescriptions.get_by_patient(patient_id)
+        if rx is None:
+            return {
+                "feasible": False,
+                "status": "NO_PRESCRIPTION",
+                "snapshot_time": _iso(data_source.SNAPSHOT_TIME),
+                "total_minutes": 0.0, "total_wait": 0.0, "total_idle": 0.0,
+                "order": [], "steps": [], "reminders": [], "comparison": {},
+                "conflicts": [f"患者「{patient_id}」还没有医嘱，请先在医生端完成开单"],
+                "notes": [],
+            }
+        codes = list(rx.items)
+
     tickets = {str(k): int(v) for k, v in (body.get("tickets") or {}).items()
                if v not in (None, "")}
     now = data_source.SNAPSHOT_TIME
@@ -156,10 +174,14 @@ def build_recommend_payload(body: Dict[str, Any]) -> Dict[str, Any]:
                 "call_at": None if s.call_at is None else round(s.call_at, 1),
                 "missed": s.missed,
                 "shared_with": s.shared_with,
+                "wait_source": s.wait_source,
+                "travel_minutes": round(s.travel_minutes, 1),
+                "needs_ticket": s.needs_ticket,
                 "reason": reasons[i] if i < len(reasons) else "",
             }
             for i, s in enumerate(plan.steps)
         ],
+        "reminders": [r.to_dict() for r in plan.reminders],
         "conflicts": plan.conflicts,
         "notes": plan.notes,
         "comparison": comparison,
@@ -218,6 +240,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": f"读取队列快照失败：{exc}"})
             return
 
+        if route == "/api/patients":
+            self._send_json(200, {"patients": prescriptions.list_patients()})
+            return
+
+        if route == "/api/prescription":
+            from urllib.parse import parse_qs
+            pid = (parse_qs(urlparse(self.path).query).get("patient_id") or [""])[0]
+            rx = prescriptions.get_by_patient(pid) if pid else None
+            if rx is None:
+                self._send_json(404, {"error": f"患者「{pid}」暂无医嘱"})
+                return
+            self._send_json(200, rx.to_dict())
+            return
+
         name = "index.html" if route in ("/", "/index.html", "") else route.lstrip("/")
         target = os.path.normpath(os.path.join(STATIC_DIR, name))
         if target.startswith(STATIC_DIR) and os.path.isfile(target):
@@ -227,7 +263,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         route = urlparse(self.path).path
-        if route not in ("/api/recommend", "/api/take"):
+        if route not in ("/api/recommend", "/api/take",
+                         "/api/prescription", "/api/prescription/reset"):
             self._send_json(404, {"error": "未找到该路径"})
             return
 
@@ -237,6 +274,26 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(raw or b"{}")
         except json.JSONDecodeError:
             self._send_json(400, {"error": "请求体不是合法 JSON"})
+            return
+
+        if route == "/api/prescription":
+            patient_id = str(body.get("patient_id", "")).strip()
+            items = [str(i) for i in (body.get("items") or []) if i]
+            doctor = str(body.get("doctor") or "门诊医生")
+            if not patient_id or not items:
+                self._send_json(400, {"error": "需要 patient_id 与 items"})
+                return
+            try:
+                rx = prescriptions.issue(patient_id, items, doctor)
+            except (KeyError, ValueError) as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            self._send_json(200, {"ok": True, "prescription": rx.to_dict()})
+            return
+
+        if route == "/api/prescription/reset":
+            prescriptions.reset()
+            self._send_json(200, {"ok": True})
             return
 
         if route == "/api/take":

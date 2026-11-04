@@ -43,6 +43,9 @@ class _Candidate:
     call_at: Optional[float] = None
     missed: bool = False
     shared_with: Optional[str] = None
+    wait_source: str = "estimate"
+    travel_minutes: float = 0.0
+    needs_ticket: bool = False
 
 
 def _deviation(order: Sequence[int], ref_pos: Dict[int, int]) -> int:
@@ -69,12 +72,15 @@ class ExamScheduler:
         start_time: float = 0.0,
         completed: Optional[Dict[str, float]] = None,
         tickets: Optional[Dict[str, int]] = None,
+        travel_minutes: float = 0.0,
     ) -> None:
         self.exams: List[Exam] = list(exams)
         self.estimator = estimator
         self.start_time = float(start_time)
         self.completed: Dict[str, float] = dict(completed or {})
         self.windows: List[TimeWindow] = list(windows)
+        # 换科室的单程耗时。同科室连续两项视为一次到场，不再计移动。
+        self.travel_minutes = max(0.0, float(travel_minutes))
         # 患者已经取到的号：检查编码 -> 号码。没取号的项走"到达即排队"的旧逻辑。
         self.tickets: Dict[str, int] = {
             str(k): int(v) for k, v in (tickets or {}).items() if v is not None
@@ -126,6 +132,15 @@ class ExamScheduler:
 
         window = self._windows.get(idx)
 
+        # 换科室的移动耗时。同科室连续两项视为一次到场，不再计移动；
+        # 第一项从当前位置直接出发，也不计。
+        prev_dept: Optional[str] = None
+        prev_finish = -1e18
+        for j, fin in finish_of.items():
+            if fin > prev_finish:
+                prev_finish, prev_dept = fin, self.exams[j].department
+        travel = self.travel_minutes if (prev_dept is not None and prev_dept != exam.department) else 0.0
+
         # 同科室是否已有项目被安排。若有，患者到那时人已经在科室里，
         # 后面的项目可以顺带一次做完（典型：检验科一次采血做血常规 + 生化）。
         same_finish: Optional[float] = None
@@ -139,12 +154,12 @@ class ExamScheduler:
         if ticket is not None:
             call = self.estimator.call_offset(exam.department, ticket)
             if call is not None:
-                arrive = max(now, release)
+                arrive = max(now + travel, release)
                 if window is not None and arrive < window[0]:
                     arrive = float(window[0])
 
-                # 2a) 顺带做：前一项做完时，本项的号已被叫过，但人还在该科室
-                if same_finish is not None and same_finish >= call - 1e-9:
+                # 2a) 顺带做：上一项就在同科室、人还在里面，且本项的号已被叫过
+                if same_finish is not None and travel <= 1e-9 and same_finish >= call - 1e-9:
                     start = max(arrive, same_finish)
                     if window is not None and start > window[1] + 1e-9:
                         return None
@@ -158,6 +173,8 @@ class ExamScheduler:
                         ticket=ticket,
                         call_at=call,
                         shared_with=same_code,
+                        wait_source="ticket",
+                        travel_minutes=travel,
                     )
 
                 # 2b) 赶得上：按号等到叫号时刻开始
@@ -173,11 +190,13 @@ class ExamScheduler:
                         forced_idle=0.0,
                         ticket=ticket,
                         call_at=call,
+                        wait_source="ticket",
+                        travel_minutes=travel,
                     )
 
                 # 2c) 号已过：作废，按到达时刻现场重新取号排队。
                 #     不判"不可行"——真实医院也是让你去分诊台重取，代价是多等一会儿。
-                wait = self.estimator.wait_at(exam.department, arrive)
+                wait = self.estimator.estimate_wait_at(exam.department, arrive)
                 start = arrive + wait
                 if window is not None and start > window[1] + 1e-9:
                     return None
@@ -191,14 +210,16 @@ class ExamScheduler:
                     ticket=ticket,
                     call_at=call,
                     missed=True,
+                    wait_source="estimate",
+                    travel_minutes=travel,
                 )
 
         # 3) 未取号：按"到达即排队"估算
-        arrive = max(now, release)
+        arrive = max(now + travel, release)
         if window is not None and arrive < window[0]:
             arrive = float(window[0])
 
-        wait = self.estimator.wait_at(exam.department, arrive)
+        wait = self.estimator.estimate_wait_at(exam.department, arrive)
         start = arrive + wait
 
         if window is not None and start > window[1] + 1e-9:
@@ -211,6 +232,9 @@ class ExamScheduler:
             start=start,
             finish=start + exam.service_minutes,
             forced_idle=arrive - now,
+            wait_source="estimate",
+            travel_minutes=travel,
+            needs_ticket=exam.code not in self.tickets,
         )
 
     @staticmethod
@@ -226,6 +250,9 @@ class ExamScheduler:
             call_at=cand.call_at,
             missed=cand.missed,
             shared_with=cand.shared_with,
+            wait_source=cand.wait_source,
+            travel_minutes=cand.travel_minutes,
+            needs_ticket=cand.needs_ticket,
         )
 
     def simulate(self, sequence: Sequence[str], start_time: Optional[float] = None) -> Optional[Plan]:
@@ -507,7 +534,7 @@ class ExamScheduler:
                 continue
 
             arrive = max(now, release)
-            wait = self.estimator.wait_at(exam.department, arrive)
+            wait = self.estimator.estimate_wait_at(exam.department, arrive)
             start = arrive + wait
             window = self._windows.get(idx)
             if window and start > window[1] + 1e-9:

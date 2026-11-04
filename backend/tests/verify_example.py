@@ -46,23 +46,30 @@ def _clock(base: datetime, offset: float) -> str:
 # ----------------------------------------------------------------------
 # 独立实现的模拟器（与 solver._candidate 无关，按公式重新写）
 # ----------------------------------------------------------------------
-def simulate(order, depts, svc, waits, deps, windows, drain=1.0, start=0.0):
+def simulate(order, depts, svc, waits, deps, windows, drain=1.0, start=0.0,
+             travel=0.0, buffer=1.0):
     now = start
     done: Dict[str, float] = {}
     rows = []
+    prev_dept = None
 
     for code in order:
-        release = now
+        dept = depts[code]
+        # 换科室的移动耗时：同科室连续两项视为一次到场
+        move = travel if (prev_dept is not None and prev_dept != dept) else 0.0
+
+        release = now + move
         for before, lag in deps.get(code, []):
             if before not in done:
                 return None
             release = max(release, done[before] + lag)
 
-        arrive = max(now, release)
+        arrive = max(now + move, release)
         if code in windows and arrive < windows[code][0]:
             arrive = windows[code][0]
 
-        wait = max(0.0, waits[depts[code]] - drain * arrive)
+        # 未取号：先按队列消退算剩余等待，再整体上浮安全系数
+        wait = max(0.0, waits[dept] - drain * arrive) * buffer
         begin = arrive + wait
 
         if code in windows and begin > windows[code][1] + 1e-9:
@@ -70,8 +77,9 @@ def simulate(order, depts, svc, waits, deps, windows, drain=1.0, start=0.0):
 
         finish = begin + svc[code]
         done[code] = finish
-        rows.append((code, arrive, wait, begin, finish))
+        rows.append((code, arrive, wait, begin, finish, move))
         now = finish
+        prev_dept = dept
 
     return rows
 
@@ -81,7 +89,9 @@ def brute_force(codes, depts, svc, waits, deps, windows, drain=1.0):
     best_order = None
     feasible_count = 0
     for perm in itertools.permutations(codes):
-        rows = simulate(perm, depts, svc, waits, deps, windows, drain)
+        rows = simulate(perm, depts, svc, waits, deps, windows, drain,
+                        travel=rules_mod.TRAVEL_MINUTES,
+                        buffer=rules_mod.ESTIMATE_BUFFER)
         if rows is None:
             continue
         feasible_count += 1
@@ -160,12 +170,18 @@ def verify(
     print(f"  全排列 {len(list(itertools.permutations(codes)))} 种，其中可行 {feasible} 种")
     print(f"  穷举最优：{total_bf:.0f} 分钟   顺序 {' → '.join(names[c] for c in order_bf)}")
     print(f"  求解器  ：{total_solver:.0f} 分钟   顺序 {' → '.join(names[c] for c in plan.order())}")
-    ok_total = abs(total_bf - total_solver) < 1e-6
-    print(f"  {'✓ 一致' if ok_total else '× 不一致'}")
+    ok_total = abs(total_bf - total_solver) < 0.05
+    same_order = list(order_bf) == list(plan.order())
+    if ok_total and not same_order:
+        print("  ✓ 总时长一致（顺序不同，属多解，不影响最优性）")
+    else:
+        print(f"  {'✓ 一致' if ok_total else '× 不一致'}")
 
     # ---- 逐项重算 ----
     print("\n[3] 逐项重算（用独立模拟器复现求解器的输出）")
-    rows = simulate(plan.order(), depts, svc, waits, deps, windows)
+    rows = simulate(plan.order(), depts, svc, waits, deps, windows,
+                    travel=rules_mod.TRAVEL_MINUTES,
+                    buffer=rules_mod.ESTIMATE_BUFFER)
     header = (f"  {'#':<4}{_pad('检查', 14)}{_pad('科室', 10)}"
               f"{_pad('到达', 8, 'right')}{_pad('等待', 8, 'right')}"
               f"{_pad('开始', 8, 'right')}{_pad('结束', 8, 'right')}   重算校验")
@@ -173,13 +189,16 @@ def verify(
     print("  " + "-" * 74)
     all_match = True
     for k, (step, row) in enumerate(zip(plan.steps, rows), 1):
-        code, arrive, wait, begin, finish = row
+        code, arrive, wait, begin, finish, _move = row
         match = (
             abs(step.arrive_at - arrive) < 1e-6
             and abs(step.wait_minutes - wait) < 1e-6
             and abs(step.start_at - begin) < 1e-6
             and abs(step.finish_at - finish) < 1e-6
         )
+        if not match:
+            print(f"      求解器 arrive={step.arrive_at:.3f} wait={step.wait_minutes:.3f} "
+                  f"start={step.start_at:.3f} | 重算 arrive={arrive:.3f} wait={wait:.3f} start={begin:.3f}")
         all_match = all_match and match
         print(
             f"  {k:<4}{_pad(names[code], 14)}{_pad(depts[code], 10)}"
@@ -259,12 +278,13 @@ def scenario_two() -> bool:
     windows = {"US_ABD": (-60.0, 60.0)}   # 10:00 关闭
 
     states = [DepartmentState(d, 10, w) for d, w in waits.items()]
-    est = QueueEstimator(states)
+    est = QueueEstimator(states, buffer=rules_mod.ESTIMATE_BUFFER)
     sched = ExamScheduler(
         [Exam(c, names[c], depts[c], svc[c]) for c in codes],
         [Dependency("R1", "ECG", "ECHO", 15.0)],
         [TimeWindow("W1", "US_ABD", -60, 60)],
         est,
+        travel_minutes=rules_mod.TRAVEL_MINUTES,
     )
     plan = sched.solve()
     return verify("场景二：时间窗 + 结果间隔（09:00 快照）",

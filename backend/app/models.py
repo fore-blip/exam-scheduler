@@ -23,6 +23,51 @@ class Exam:
     note: str = ""
 
 
+@dataclass
+class Prescription:
+    """医嘱：医生开立的检查清单。
+
+    用户端不再自选项目，只能按这份清单执行——对应「有了医生给的凭证才能去做」。
+    """
+
+    prescription_id: str
+    patient_id: str
+    patient_name: str
+    department: str            # 就诊科室，如"内科"
+    doctor: str
+    items: List[str] = field(default_factory=list)   # 检查编码列表
+    status: str = "pending"    # pending=待开单 / issued=已开单 / done=已完成
+    created_at: Optional[datetime] = None
+    note: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "prescription_id": self.prescription_id,
+            "patient_id": self.patient_id,
+            "patient_name": self.patient_name,
+            "department": self.department,
+            "doctor": self.doctor,
+            "items": list(self.items),
+            "status": self.status,
+            "created_at": self.created_at.strftime("%H:%M") if self.created_at else "",
+            "note": self.note,
+        }
+
+
+@dataclass
+class Patient:
+    """医生端看到的就诊患者。"""
+
+    patient_id: str
+    name: str
+    age: int
+    gender: str
+    department: str            # 就诊科室
+    chief_complaint: str       # 主诉
+    status: str = "waiting"    # waiting=待开单 / issued=已开单
+    prescription_id: Optional[str] = None
+
+
 @dataclass(frozen=True)
 class DepartmentState:
     """科室队列快照（方案 §3.2 输入B）。
@@ -79,9 +124,40 @@ class PlanStep:
     missed: bool = False           # 号已过，本步改为现场重新取号
     shared_with: Optional[str] = None  # 与同科室某项共用一次到场（如一次采血）
 
+    # 取号与检查解耦后新增
+    wait_source: str = "estimate"  # ticket=按号精确 / estimate=按队列估算
+    travel_minutes: float = 0.0    # 从上一处到本处的移动耗时
+    needs_ticket: bool = False     # 本项尚未取号，执行前需要先去取
+
     @property
     def total_minutes(self) -> float:
         return self.wait_minutes + self.exam.service_minutes
+
+
+@dataclass
+class TicketReminder:
+    """取号提醒：在等某一项的空档里，顺路去把另一项的号取了。"""
+
+    at: float                      # 建议出发取号的时刻（相对快照，分钟）
+    during_exam: str               # 正在等哪一项
+    exam_code: str                 # 为哪一项取号
+    exam_name: str
+    department: str
+    travel_minutes: float          # 单程耗时
+    expect_call_at: float          # 取号后预计被叫到的时刻（相对快照，分钟）
+    reason: str                    # 一句话解释
+
+    def to_dict(self) -> dict:
+        return {
+            "at": round(self.at, 1),
+            "during_exam": self.during_exam,
+            "exam_code": self.exam_code,
+            "exam_name": self.exam_name,
+            "department": self.department,
+            "travel_minutes": round(self.travel_minutes, 1),
+            "expect_call_at": round(self.expect_call_at, 1),
+            "reason": self.reason,
+        }
 
 
 @dataclass
@@ -93,6 +169,7 @@ class Plan:
     status: str = ""
     conflicts: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
+    reminders: List[TicketReminder] = field(default_factory=list)
     nodes: int = 0
     elapsed_ms: float = 0.0
 

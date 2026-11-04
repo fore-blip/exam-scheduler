@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import rules as rules_mod
 from .estimator import QueueEstimator
-from .models import DepartmentState, Exam, Plan, TimeWindow
+from .models import DepartmentState, Exam, Plan, TicketReminder, TimeWindow
 from .solver import ExamScheduler
 
 
@@ -103,7 +103,8 @@ def _prepare(
     if missing_dept:
         raise RequestError(f"队列快照缺少科室：{', '.join(missing_dept)}")
 
-    estimator = QueueEstimator(states.values(), drain_rate=drain_rate)
+    estimator = QueueEstimator(states.values(), drain_rate=drain_rate,
+                               buffer=rules_mod.ESTIMATE_BUFFER)
     windows = _shift_windows(rules_mod.build_windows(), now.hour * 60 + now.minute)
 
     scheduler = ExamScheduler(
@@ -114,8 +115,72 @@ def _prepare(
         start_time=start_offset,
         completed=completed or {},
         tickets=clean_tickets,
+        travel_minutes=rules_mod.TRAVEL_MINUTES,
     )
     return scheduler, None
+
+
+def build_reminders(
+    plan: Plan,
+    states: Dict[str, DepartmentState],
+    tickets: Dict[str, int],
+) -> List[TicketReminder]:
+    """在等待窗口里寻找可以顺路取号的空档。
+
+    判据（源自「取号与检查解耦」的设计讨论）：
+
+        本步占用时间（排队 + 检查） + 往返耗时 ≤ 目标科室当前排队 × 保守系数
+
+    左边是「取完号回来、再把当前这项做完」需要的时间，右边是「取到号后到被叫到」
+    的等待。左边不超过右边，就说明取完号回来号还没被叫过，不会过号。
+    """
+    if not plan.feasible or not plan.steps:
+        return []
+
+    travel = rules_mod.TRAVEL_MINUTES
+    round_trip = travel * 2.0
+    pending = [s for s in plan.steps if s.needs_ticket]
+    if not pending:
+        return []
+
+    out: List[TicketReminder] = []
+    used_dept: set = set()
+
+    for step in plan.steps:
+        if step.wait_minutes < rules_mod.REMIND_MIN_WAIT:
+            continue
+        busy = step.wait_minutes + step.exam.service_minutes
+        for cand in pending:
+            code = cand.exam.code
+            dept = cand.exam.department
+            if code in tickets or dept in used_dept:
+                continue
+            if dept == step.exam.department:
+                continue                     # 同科室做完顺手取，不必提醒
+            st = states.get(dept)
+            if st is None or st.wait_minutes <= 0:
+                continue
+            b_wait = st.wait_minutes * rules_mod.REMIND_BUFFER
+            if busy + round_trip > b_wait:
+                continue                     # 取完号回来会过号，不提醒
+
+            out.append(TicketReminder(
+                at=step.arrive_at,
+                during_exam=step.exam.name,
+                exam_code=code,
+                exam_name=cand.exam.name,
+                department=dept,
+                travel_minutes=travel,
+                expect_call_at=step.arrive_at + travel + b_wait,
+                reason=(
+                    f"等{step.exam.name}的 {step.wait_minutes:.0f} 分钟里，"
+                    f"可顺路去{dept}取号（往返 {round_trip:.0f} 分钟）；"
+                    f"{dept}当前排队约 {st.wait_minutes:.0f} 分钟，回来仍赶得上"
+                ),
+            ))
+            used_dept.add(dept)
+            break                            # 一步只提醒一项，避免刷屏
+    return out
 
 
 def recommend(
@@ -173,6 +238,13 @@ def recommend(
         )
 
     plan.notes.extend(_build_notes(plan, scheduler.exams, scheduler.estimator, scheduler.windows))
+
+    plan.reminders = build_reminders(plan, states, tickets or {})
+    if plan.reminders:
+        plan.notes.append(
+            "部分项目还没取号，方案在等待空档里给出了取号建议；"
+            "按建议取号可避免做完再跑一趟"
+        )
     plan.notes.extend(scheduler.estimator.consistency_warnings())
     return plan
 

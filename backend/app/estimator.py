@@ -32,11 +32,13 @@ from .models import DepartmentState
 class QueueEstimator:
     """按"冻结快照 + 线性消退"估算任意时刻的排队等待。"""
 
-    def __init__(self, states: Iterable[DepartmentState], drain_rate: float = 1.0) -> None:
+    def __init__(self, states: Iterable[DepartmentState], drain_rate: float = 1.0,
+                 buffer: float = 1.0) -> None:
         if not 0.0 <= drain_rate <= 1.0:
             raise ValueError("drain_rate 应位于 [0, 1]：1 表示队列完全消退，0 表示完全不消退")
         self._states: Dict[str, DepartmentState] = {s.department: s for s in states}
         self._drain = float(drain_rate)
+        self._buffer = max(1.0, float(buffer))
 
     @property
     def drain_rate(self) -> float:
@@ -63,6 +65,10 @@ class QueueEstimator:
         if offset_minutes <= 0:
             return max(0.0, st.wait_minutes)
         return max(0.0, st.wait_minutes - self._drain * offset_minutes)
+
+    def estimate_wait_at(self, department: str, offset_minutes: float = 0.0) -> float:
+        """未取号时的估算等待，对剩余等待整体上浮安全系数，降低过号概率。"""
+        return self.wait_at(department, offset_minutes) * self._buffer
 
     def service_estimate(self, department: str) -> Optional[float]:
         """由"排队人数 / 等待时长"反推的单人平均服务时长，仅用于数据自检。"""
