@@ -250,12 +250,13 @@
 
   /* ==================== 双端导航 ==================== */
   .viewtabs{display:flex;gap:4px;padding:4px;background:#EEF2F7;border-radius:10px;margin-left:auto}
-  .viewtabs button{
+  .viewtabs button,.viewtabs a{
     font:inherit;font-size:13px;padding:6px 16px;border:0;border-radius:8px;
     background:transparent;color:#5A6B7F;cursor:pointer;transition:.15s;
+    text-decoration:none;display:inline-block;
   }
-  .viewtabs button:hover{color:var(--text)}
-  .viewtabs button.on{background:#fff;color:var(--accent);font-weight:500;box-shadow:0 1px 3px rgba(22,32,44,.08)}
+  .viewtabs button:hover,.viewtabs a:hover{color:var(--text)}
+  .viewtabs button.on,.viewtabs a.on{background:#fff;color:var(--accent);font-weight:500;box-shadow:0 1px 3px rgba(22,32,44,.08)}
 
   /* ==================== 患者端：医嘱与空态 ==================== */
   .empty{padding:34px 20px;text-align:center;color:var(--muted)}
@@ -310,3 +311,78 @@
     margin-left:6px;font-weight:400;
   }
   .tk-tag{font-size:10.5px;padding:1px 6px;border-radius:4px;background:#E9F5F2;color:#0F766E;margin-left:6px}
+
+  /* ==================== 挂号与就诊 ==================== */
+
+  .dept-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+  .dept-pick{
+    text-align:left;border:1px solid var(--line);border-radius:11px;background:#FBFCFD;
+    padding:12px 14px;transition:.15s;cursor:pointer;display:block;width:100%;
+    text-decoration:none;color:inherit;
+  }
+  .dept-pick:hover{border-color:var(--accent-line);background:#fff}
+  .dept-pick.on{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 0 0 1px var(--accent) inset}
+  .dept-pick .dn{font-size:14px;font-weight:600;display:flex;align-items:center;gap:7px}
+  .dept-pick .dd{font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.5}
+  .dept-pick .dm{font-size:11.5px;color:var(--faint);margin-top:8px;display:flex;gap:10px;flex-wrap:wrap}
+  .dept-pick .dm b{color:var(--text);font-weight:600}
+  .dept-pick .badge{
+    margin-left:auto;font-size:11px;font-weight:500;padding:1px 7px;border-radius:5px;
+    background:#EEF2F7;color:#5A6B7F;
+  }
+  .dept-pick.on .badge{background:#fff;color:var(--accent)}
+
+  .reg-form{
+    margin-top:16px;padding-top:16px;border-top:1px dashed var(--line);
+    display:grid;grid-template-columns:1fr 1fr 1fr 2fr auto;gap:10px;align-items:end;
+  }
+  .field{display:flex;flex-direction:column;gap:5px;min-width:0}
+  .field>span{font-size:11.5px;color:var(--muted)}
+  .field input,.field select{
+    font:inherit;font-size:13.5px;padding:8px 10px;border:1px solid var(--line);
+    border-radius:9px;background:#fff;color:var(--text);min-width:0;
+  }
+  .field input:focus,.field select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(15,118,110,.09)}
+  .field.submit{padding-bottom:0}
+
+  .visit-card{
+    display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+    border:1px solid var(--accent-line);background:var(--accent-soft);
+    border-radius:12px;padding:14px 18px;
+  }
+  .visit-no{font-size:26px;font-weight:700;letter-spacing:.5px;color:#0F4F49;line-height:1.1}
+  .visit-no small{display:block;font-size:11px;font-weight:400;color:#3F7D75;letter-spacing:0}
+  .visit-info{font-size:13px;color:#23544E;line-height:1.7}
+  .visit-info b{font-weight:600}
+  .visit-state{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .pill{font-size:11.5px;padding:3px 10px;border-radius:20px;background:#fff;color:#0F4F49;border:1px solid var(--accent-line)}
+  .pill.done{background:#0F766E;color:#fff;border-color:#0F766E}
+
+  .visit-wait{
+    margin-top:14px;border:1px dashed var(--line);border-radius:11px;
+    padding:16px 18px;background:#FBFCFD;
+  }
+  .visit-wait b{display:block;font-size:13.5px;margin-bottom:5px}
+  .visit-wait p{margin:0;font-size:12.5px;color:var(--muted);line-height:1.75}
+
+  /* 面包屑 */
+  .crumb{
+    display:flex;align-items:center;gap:12px;margin:0 0 14px;
+    font-size:13px;color:var(--muted);
+  }
+  .crumb a{color:var(--accent);text-decoration:none;font-size:12.5px}
+  .crumb a:hover{text-decoration:underline}
+  .crumb #crumbName{font-size:16px;font-weight:600;color:var(--text)}
+
+  /* 本科室项目标记 */
+  .exam .own-tag{
+    font-size:10.5px;padding:1px 6px;border-radius:4px;background:#EAF3FF;color:#1D4ED8;
+  }
+  .exam .pmeta{font-size:11px;color:var(--faint);margin-top:2px}
+
+  @media(max-width:820px){
+    .reg-form{grid-template-columns:1fr 1fr}
+    .field.wide,.field.submit{grid-column:1 / -1}
+    .field.submit .btn{width:100%}
+    .visit-state{margin-left:0;width:100%}
+  }

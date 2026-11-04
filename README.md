@@ -181,14 +181,36 @@ A 剩余(排队 + 检查) + 往返耗时 ≤ B 当前排队
 
 左边是「取完号回来、再把 A 做完」要花的时间，右边是「取到号到被叫到」的等待。左边不超过右边，说明取完号回来号还没被叫过，不会过号。
 
-### 3. 项目由医生开单，患者不能自选
+### 3. 患者先选科室挂号，医生按科室分页面
 
-同一站点两个页面：
+同一站点两套页面，靠 URL 区分：
 
-- **医生端**：患者列表 → 勾选检查项目 → 开具检查单
-- **患者端**：接收医嘱清单 → 生成路线 → 按提醒去取号
+| 路径 | 页面 | 说明 |
+|---|---|---|
+| `/` | 患者端 | 挂号 → 我的就诊 → 医嘱与路线 |
+| `/doctor` | 医生端科室列表 | 每个科室显示待诊人数 |
+| `/doctor/<code>` | 某一科室的工作台 | **只显示该科室挂号的患者** |
 
-患者端看不到未开单的项目，对应「有医生给的凭证才能去做」。
+科室编码：`lab` 检验科、`ecg` 心电科、`us` 超声科、`rad` 放射科、`resp` 呼吸科。
+
+流程：
+
+```
+患者选科室挂号（填姓名/年龄/主诉）
+        ↓ 生成就诊号，如「检验科 J002」
+该科室医生在 /doctor/lab 看到这位患者
+        ↓ 勾选检查项目、开单
+患者端自动收到清单，生成路线
+        ↓ 按提醒去取号
+```
+
+**科室隔离在服务端完成**，不是界面隐藏：
+
+- `GET /api/doctor/<code>/patients` 只返回该科室患者，前端拿不到别的科室数据
+- `POST /api/prescription` 带 `department` 参数，患者归属不符时返回 **403**
+- `GET /api/patients` 必须带 `?department=`，否则拒绝
+
+医生可以开具**其他科室**的项目（原需求：医生能开 CT、胃镜、心电图），本科室项目在界面上排在最前并标注「本科室」。
 
 ### 4. 移动耗时计入时间轴
 
@@ -204,12 +226,16 @@ A 剩余(排队 + 检查) + 往返耗时 ≤ B 当前排队
 |---|---|---|
 | GET | `/api/catalog` | 全部可选检查项 + 科室队列快照 |
 | GET | `/api/snapshot` | 仅队列快照，含数据新鲜度状态 |
-| GET | `/api/patients` | 医生端：患者列表与开单状态 |
+| GET | `/api/departments` | 挂号科室列表（含待诊人数、检查队列） |
+| POST | `/api/register` | 患者挂号：`{"name","age","gender","chief_complaint","department"}` |
+| GET | `/api/doctor/<code>/patients` | **本科室**患者列表（服务端隔离） |
+| GET | `/api/patient/<pid>` | 患者自己的就诊记录与医嘱 |
 | GET | `/api/prescription?patient_id=P001` | 患者端：查询医嘱 |
-| POST | `/api/prescription` | 医生开单：`{"patient_id": "P001", "items": ["ECG","CBC"]}` |
-| POST | `/api/prescription/reset` | 演示重置，清空医嘱 |
+| POST | `/api/prescription` | 医生开单，带 `department` 时校验归属：`{"patient_id","items","department"}` |
+| POST | `/api/prescription/reset` | 演示重置，清空挂号与医嘱 |
 | POST | `/api/take` | 取号：`{"department": "心电科"}` |
 | POST | `/api/recommend` | 求解路线：`{"patient_id": "P001"}` |
+| GET | `/api/patients?department=<code>` | 兼容接口，必须指定科室 |
 
 `POST /api/recommend` 请求：
 

@@ -37,6 +37,27 @@ def _iso(moment) -> str:
     return moment.strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def build_departments_payload() -> Dict[str, Any]:
+    """挂号科室列表：患者端选科室、医生端做导航都用这一份。"""
+    states = data_source.get_snapshot(data_source.SNAPSHOT_TIME)
+    out = []
+    for cfg in rules_mod.DEPARTMENTS:
+        st = states.get(cfg["name"])
+        out.append({
+            "code": cfg["code"],
+            "name": cfg["name"],
+            "prefix": cfg["prefix"],
+            "desc": cfg["desc"],
+            "exams": list(cfg["exams"]),
+            # 待诊人数按本科室的挂号记录算，不是检查队列
+            "waiting": prescriptions.waiting_count(cfg["code"]),
+            # 检查队列现状，帮患者判断哪个科室现在不挤
+            "queue_length": st.queue_length if st else 0,
+            "wait_minutes": round(st.wait_minutes, 1) if st else 0.0,
+        })
+    return {"departments": out}
+
+
 def build_snapshot_payload() -> Dict[str, Any]:
     """只返回队列快照，供前端做高频轮询（比整份 catalog 轻）。"""
     states = data_source.get_snapshot(data_source.SNAPSHOT_TIME)
@@ -240,8 +261,45 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": f"读取队列快照失败：{exc}"})
             return
 
+        if route == "/api/departments":
+            try:
+                self._send_json(200, build_departments_payload())
+            except Exception as exc:
+                self._send_json(500, {"error": f"读取科室信息失败：{exc}"})
+            return
+
+        # 医生端：只返回本科室患者，隔离在服务端完成
+        if route.startswith("/api/doctor/") and route.endswith("/patients"):
+            code = route[len("/api/doctor/"):-len("/patients")].strip("/")
+            cfg = rules_mod.dept_of_code(code)
+            if cfg is None:
+                self._send_json(404, {"error": f"未知科室：{code}"})
+                return
+            self._send_json(200, {
+                "department": {"code": cfg["code"], "name": cfg["name"],
+                               "desc": cfg["desc"], "prefix": cfg["prefix"]},
+                "patients": prescriptions.list_patients(dept_code=cfg["code"]),
+            })
+            return
+
+        # 患者端：自己的就诊记录 + 医嘱
+        if route.startswith("/api/patient/"):
+            pid = route[len("/api/patient/"):].strip("/")
+            patient = prescriptions.get_patient(pid)
+            if patient is None:
+                self._send_json(404, {"error": f"未找到患者：{pid}"})
+                return
+            self._send_json(200, {"patient": patient})
+            return
+
         if route == "/api/patients":
-            self._send_json(200, {"patients": prescriptions.list_patients()})
+            # 兼容接口：必须指定科室，避免无意中拿到全院数据
+            from urllib.parse import parse_qs
+            code = (parse_qs(urlparse(self.path).query).get("department") or [""])[0]
+            if not code:
+                self._send_json(400, {"error": "请指定 department 参数（科室编码）"})
+                return
+            self._send_json(200, {"patients": prescriptions.list_patients(dept_code=code)})
             return
 
         if route == "/api/prescription":
@@ -258,12 +316,19 @@ class Handler(BaseHTTPRequestHandler):
         target = os.path.normpath(os.path.join(STATIC_DIR, name))
         if target.startswith(STATIC_DIR) and os.path.isfile(target):
             self._serve_static(name)
-        else:
-            self._send_json(404, {"error": "未找到该路径"})
+            return
+
+        # 前端是单页应用：/doctor、/doctor/lab、/patient 这类无扩展名路径
+        # 直接返回 index.html，由前端按 location.pathname 决定渲染哪一页。
+        if "." not in os.path.basename(route):
+            self._serve_static("index.html")
+            return
+
+        self._send_json(404, {"error": "未找到该路径"})
 
     def do_POST(self) -> None:
         route = urlparse(self.path).path
-        if route not in ("/api/recommend", "/api/take",
+        if route not in ("/api/recommend", "/api/take", "/api/register",
                          "/api/prescription", "/api/prescription/reset"):
             self._send_json(404, {"error": "未找到该路径"})
             return
@@ -276,15 +341,36 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "请求体不是合法 JSON"})
             return
 
+        if route == "/api/register":
+            try:
+                patient = prescriptions.register(
+                    name=str(body.get("name", "")),
+                    age=int(body.get("age") or 0),
+                    gender=str(body.get("gender", "")),
+                    dept_code=str(body.get("department", "") or body.get("dept_code", "")),
+                    chief=str(body.get("chief_complaint", "")),
+                )
+            except (ValueError, TypeError) as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            self._send_json(200, {"ok": True, "patient": patient})
+            return
+
         if route == "/api/prescription":
             patient_id = str(body.get("patient_id", "")).strip()
             items = [str(i) for i in (body.get("items") or []) if i]
             doctor = str(body.get("doctor") or "门诊医生")
+            # 医生所在科室：带了这个参数就会做归属校验
+            dept_code = str(body.get("department") or body.get("dept_code") or "").strip()
             if not patient_id or not items:
                 self._send_json(400, {"error": "需要 patient_id 与 items"})
                 return
             try:
-                rx = prescriptions.issue(patient_id, items, doctor)
+                rx = prescriptions.issue(patient_id, items, doctor,
+                                         dept_code=dept_code or None)
+            except PermissionError as exc:
+                self._send_json(403, {"error": str(exc)})
+                return
             except (KeyError, ValueError) as exc:
                 self._send_json(400, {"error": str(exc)})
                 return

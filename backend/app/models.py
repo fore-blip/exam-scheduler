@@ -62,8 +62,11 @@ class Patient:
     name: str
     age: int
     gender: str
-    department: str            # 就诊科室
+    department: str            # 挂号科室中文名
     chief_complaint: str       # 主诉
+    dept_code: str = ""        # 挂号科室编码（lab/ecg/us/rad/resp），用于医生端按科室隔离
+    visit_no: str = ""         # 就诊号，如「检验科 J003」
+    created_at: Optional[datetime] = None
     status: str = "waiting"    # waiting=待开单 / issued=已开单
     prescription_id: Optional[str] = None
 

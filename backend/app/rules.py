@@ -185,6 +185,45 @@ ESTIMATE_BUFFER = 1.15     # 估算等待的安全系数：展示值比理论值
 REMIND_BUFFER = 1.25       # 判断「来不来得及取号」时用更保守的系数
 REMIND_MIN_WAIT = 8.0      # 等待不足这个分钟数就不值得跑一趟取号
 
+# ----------------------------------------------------------------------
+# 挂号科室（患者选这个，医生按这个分页面）
+#
+# 本演示采用「单层」结构：患者直接挂到检查科室，该科室医生开单。
+# code 用于 URL（/doctor/lab），name 用于界面展示，prefix 用于生成就诊号。
+# exams 是该科室自己能开的项目；医生页会把这些项目排在前面并标注「本科室」，
+# 但仍可开具其他科室的项目（原需求：医生可开 CT、胃镜、心电图等）。
+# ----------------------------------------------------------------------
+DEPARTMENTS = [
+    {"code": "lab",  "name": "检验科", "prefix": "J",
+     "desc": "血常规、生化、炎症指标、尿常规",
+     "exams": ["CBC", "BIO", "CRP", "MP_AB", "URINE"]},
+    {"code": "ecg",  "name": "心电科", "prefix": "X",
+     "desc": "心电图",
+     "exams": ["ECG"]},
+    {"code": "us",   "name": "超声科", "prefix": "C",
+     "desc": "腹部B超、心脏彩超",
+     "exams": ["US_ABD", "ECHO"]},
+    {"code": "rad",  "name": "放射科", "prefix": "F",
+     "desc": "胸部X线等影像检查",
+     "exams": ["CXR"]},
+    {"code": "resp", "name": "呼吸科", "prefix": "H",
+     "desc": "肺功能",
+     "exams": ["PFT"]},
+]
+
+DEPT_BY_CODE = {d["code"]: d for d in DEPARTMENTS}
+DEPT_BY_NAME = {d["name"]: d for d in DEPARTMENTS}
+
+
+def dept_of_code(code: str):
+    """按 code 取科室配置，未知返回 None。"""
+    return DEPT_BY_CODE.get(str(code or "").strip())
+
+
+def dept_of_name(name: str):
+    """按中文名取科室配置，未知返回 None。"""
+    return DEPT_BY_NAME.get(str(name or "").strip())
+
 
 # ---------------------------------------------------------------------------
 # 以下为构建与校验逻辑，通常无需修改

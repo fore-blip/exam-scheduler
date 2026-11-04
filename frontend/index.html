@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>门诊检查路线规划</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
 
@@ -18,33 +18,62 @@
       </div>
     </div>
     <nav class="viewtabs" id="viewTabs">
-      <button data-view="user" class="on">患者端</button>
-      <button data-view="doctor">医生端</button>
+      <a data-view="user" href="/">患者端</a>
+      <a data-view="doctor" href="/doctor">医生端</a>
     </nav>
   </div>
 </header>
 
 <main>
   <!-- ==================== 患者端 ==================== -->
-  <section id="viewUser">
-    <section class="panel">
+  <section id="viewPatient" hidden>
+
+    <!-- 第一步：挂号选科室 -->
+    <section class="panel" id="regPanel" hidden>
       <div class="panel-head">
-        <h2>科室候检情况</h2>
-        <span class="hint" id="deptHint">正在连接叫号系统…</span>
+        <h2>选择就诊科室</h2>
+        <span class="hint">挂号后，只有该科室的医生能看到你的信息并开具检查</span>
+      </div>
+
+      <div class="dept-grid" id="regDepts"></div>
+
+      <div class="reg-form">
+        <label class="field"><span>姓名</span>
+          <input id="regName" type="text" maxlength="12" placeholder="如 张三" autocomplete="off"></label>
+        <label class="field"><span>年龄</span>
+          <input id="regAge" type="number" min="0" max="120" placeholder="如 42"></label>
+        <label class="field"><span>性别</span>
+          <select id="regGender">
+            <option value="男">男</option>
+            <option value="女">女</option>
+          </select></label>
+        <label class="field wide"><span>主诉</span>
+          <input id="regChief" type="text" maxlength="40" placeholder="如 胸闷、心悸三天" autocomplete="off"></label>
+        <div class="field submit">
+          <button class="btn primary" id="regSubmit" disabled>确认挂号</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 第二步：已挂号，等医生开单 / 已开单 -->
+    <section class="panel" id="visitPanel" hidden>
+      <div class="panel-head">
+        <h2>我的就诊</h2>
+        <span class="hint" id="visitMeta"></span>
         <span class="spacer"></span>
-        <span class="live" id="live" title="点击暂停 / 继续实时刷新"><i></i><span id="liveText">实时</span></span>
+        <button class="btn ghost" id="regAgain">重新挂号</button>
       </div>
-      <div class="dept-row" id="depts"></div>
+
+      <div class="visit-card" id="visitCard"></div>
+
+      <div class="visit-wait" id="visitWaiting">
+        <b>已进入排队</b>
+        <p>该科室医生在后台看到你的挂号信息后会开具检查单，开好后这里自动出现清单与路线，无需刷新。</p>
+      </div>
     </section>
 
-    <section class="panel" id="emptyPanel">
-      <div class="empty">
-        <b>还没有检查单</b>
-        <p>请医生在内科完成问诊后开具检查单，这里会自动收到清单并排出路线。</p>
-      </div>
-    </section>
-
-    <section class="panel" id="rxPanel" style="display:none">
+    <!-- 第三步：医嘱清单 -->
+    <section class="panel" id="rxPanel" hidden>
       <div class="panel-head">
         <h2>医生开具的检查</h2>
         <span class="hint" id="rxMeta"></span>
@@ -55,37 +84,76 @@
     </section>
 
     <section class="panel result" id="result"></section>
+
+    <!-- 科室候检情况 -->
+    <section class="panel" id="deptPanel" hidden>
+      <div class="panel-head">
+        <h2>科室候检情况</h2>
+        <span class="hint" id="deptHint">正在连接叫号系统…</span>
+        <span class="spacer"></span>
+        <span class="live" id="live" title="点击暂停 / 继续实时刷新"><i></i><span id="liveText">实时</span></span>
+      </div>
+      <div class="dept-row" id="depts"></div>
+    </section>
   </section>
 
   <!-- ==================== 医生端 ==================== -->
   <section id="viewDoctor" hidden>
-    <section class="panel">
+
+    <!-- 科室选择 -->
+    <section class="panel" id="doctorHome" hidden>
       <div class="panel-head">
-        <h2>待诊患者</h2>
-        <span class="hint">选择患者后勾选检查项目，点「开具检查单」</span>
+        <h2>选择科室</h2>
+        <span class="hint">每个科室是独立页面，只能看到本科室的患者</span>
         <span class="spacer"></span>
         <button class="btn" id="resetRx">重置演示</button>
       </div>
-      <div class="patient-list" id="patients"></div>
+      <div class="dept-grid" id="doctorDepts"></div>
     </section>
 
-    <section class="panel">
-      <div class="panel-head">
-        <h2>检查项目</h2>
-        <span class="hint" id="pickHint">先在上方选择一位患者</span>
+    <!-- 某个科室的工作台 -->
+    <section id="doctorDept" hidden>
+      <nav class="crumb">
+        <a href="/doctor">← 全部科室</a>
+        <span id="crumbName"></span>
         <span class="spacer"></span>
-        <span class="hint" id="pickCount">已选 0 项</span>
-      </div>
-      <div class="exam-grid" id="examPick"></div>
-      <div class="actions">
-        <button class="btn primary" id="issue" disabled>开具检查单</button>
-      </div>
+        <span class="hint" id="crumbHint"></span>
+      </nav>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2 id="patientsTitle">待诊患者</h2>
+          <span class="hint">仅显示本科室挂号患者</span>
+        </div>
+        <div class="patient-list" id="patients"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>检查项目</h2>
+          <span class="hint" id="pickHint">先在上方选择一位患者</span>
+          <span class="spacer"></span>
+          <span class="hint" id="pickCount">已选 0 项</span>
+        </div>
+        <div class="exam-grid" id="examPick"></div>
+        <div class="actions">
+          <button class="btn primary" id="issue" disabled>开具检查单</button>
+        </div>
+      </section>
     </section>
+  </section>
+
+  <!-- 路径不存在 -->
+  <section class="panel" id="viewNotFound" hidden>
+    <div class="empty">
+      <b>页面不存在</b>
+      <p>请从 <a href="/">患者端</a> 或 <a href="/doctor">医生端</a> 进入。</p>
+    </div>
   </section>
 </main>
 
 <div class="toast" id="toast"></div>
 
-<script src="app.js"></script>
+<script src="/app.js"></script>
 </body>
 </html>
