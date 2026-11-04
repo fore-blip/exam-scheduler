@@ -227,11 +227,27 @@ def recommend(
     assert scheduler is not None
     plan = scheduler.solve(reference_order=reference_order, time_limit=time_limit)
 
+    # 「已取号的项目先做」可能因为前置依赖无法成立（例如挂了心脏彩超的号，
+    # 但它要先有心电图结果）。这时退回全局最优，而不是直接判不可行。
+    if not plan.feasible and scheduler.tickets and scheduler.tickets_first:
+        scheduler.tickets_first = False
+        plan = scheduler.solve(reference_order=reference_order, time_limit=time_limit)
+        if plan.feasible:
+            plan.notes.append(
+                "已取号的项目之间存在前置依赖，无法全部排在最前，"
+                "方案改为全局最优；个别号可能会作废，具体见下方说明"
+            )
+
     if not plan.feasible:
         detail = _format_ticket_conflicts(scheduler, now)
         if detail:
             plan.conflicts = detail      # 有具体冲突时，替掉"找不到可行顺序"这种笼统提示
     elif scheduler.tickets:
+        if scheduler.tickets_first and len(scheduler.tickets) < len(scheduler.exams):
+            plan.notes.append(
+                "路线已按「先做已取号的检查」重新排列：已挂号的项目排在前面"
+                "（组内仍按最优顺序），其余项目在其后重新优化"
+            )
         plan.notes.append(
             "已按取号计算：各步开始时间由该号被叫到的时刻决定，"
             "按时到场即可，早到只会站着多等"

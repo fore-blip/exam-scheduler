@@ -74,6 +74,7 @@ class ExamScheduler:
         completed: Optional[Dict[str, float]] = None,
         tickets: Optional[Dict[str, int]] = None,
         travel_minutes: float = 0.0,
+        tickets_first: bool = True,
     ) -> None:
         self.exams: List[Exam] = list(exams)
         self.estimator = estimator
@@ -86,6 +87,10 @@ class ExamScheduler:
         self.tickets: Dict[str, int] = {
             str(k): int(v) for k, v in (tickets or {}).items() if v is not None
         }
+        # 已取号的项必须排在前面：号已经拿到手，患者不会（也不该）先去做别的。
+        # 打开时是硬约束——搜索时只在「还没做完的已取号项」里选，
+        # 全部做完后才放开其余项目。这样自然形成「已挂号的块 + 其余项目的块」。
+        self.tickets_first = bool(tickets_first)
 
         self._index: Dict[str, int] = {e.code: i for i, e in enumerate(self.exams)}
         self._prereq: Dict[int, List[Tuple[int, float]]] = {i: [] for i in range(len(self.exams))}
@@ -413,8 +418,16 @@ class ExamScheduler:
             if lower_bound(now, remaining) >= best["finish"] + HONOR_SLACK - 1e-9:   # type: ignore[operator]
                 return
 
+            # 已取号却没做完时，只在它们里面挑——用户手里的号是既成事实，
+            # 不能为了压缩总时长把它排到后面去作废。
+            pool: List[int] = remaining
+            if self.tickets_first and self.tickets:
+                waiting = [i for i in remaining if self.exams[i].code in self.tickets]
+                if waiting:
+                    pool = waiting
+
             cands: List[_Candidate] = []
-            for i in remaining:
+            for i in pool:
                 c = self._candidate(i, now, finish_of)
                 if c is not None:
                     cands.append(c)
