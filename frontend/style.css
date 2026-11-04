@@ -293,17 +293,32 @@
   .seg.travel{background:#D8DEE7}
   .seg.travel span{color:#5A6B7F}
 
-  /* 取号提醒 */
+  /* 取号提醒：放在路线标题上方，做成醒目提示条 */
   .remind{
-    margin-top:14px;border:1px solid #F5D9AE;background:#FEF8ED;border-radius:10px;padding:12px 14px;
+    margin:0 0 16px;border:1px solid #F0C679;border-left:4px solid #D97706;
+    background:linear-gradient(180deg,#FFF9EC,#FEF3DF);
+    border-radius:12px;padding:14px 16px;
+    box-shadow:0 2px 12px rgba(217,119,6,.10);
   }
   .remind h3{
-    margin:0 0 8px;font-size:13px;font-weight:500;color:#8A5A12;
-    display:flex;align-items:center;gap:6px;
+    margin:0 0 9px;font-size:14px;font-weight:600;color:#8A4B08;
+    display:flex;align-items:center;gap:8px;
   }
-  .remind h3::before{content:"";width:7px;height:7px;border-radius:50%;background:#D97706}
-  .remind ul{margin:0;padding-left:16px}
-  .remind li{font-size:12.5px;color:#6B4A12;line-height:1.75}
+  .remind h3::before{
+    content:"!";width:19px;height:19px;border-radius:50%;
+    background:#D97706;color:#fff;font-size:12px;font-weight:700;
+    display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;
+  }
+  .remind ul{margin:0;padding-left:0;list-style:none}
+  .remind li{
+    font-size:13px;color:#6B4A12;line-height:1.8;
+    padding-left:27px;position:relative;
+  }
+  .remind li+li{margin-top:4px}
+  .remind li::before{
+    content:"";position:absolute;left:11px;top:10px;
+    width:5px;height:5px;border-radius:50%;background:#E0A64A;
+  }
 
   /* 预估标记 */
   .est-tag{

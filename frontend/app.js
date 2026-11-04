@@ -733,6 +733,7 @@ function renderResult(d) {
     : "";
 
   box.innerHTML = `
+    ${remindHtml}
     <div class="panel-head" style="margin-bottom:14px">
       <h2>推荐路线（预估）</h2>
       <span class="spacer"></span>
@@ -754,7 +755,6 @@ function renderResult(d) {
     </div>
 
     <ul class="steps">${stepsHtml}</ul>
-    ${remindHtml}
     ${notes}
   `;
 
