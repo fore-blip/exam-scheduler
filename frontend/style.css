@@ -472,3 +472,8 @@
     background:#FFF9EC;border:1px solid #F0C679;border-radius:9px;padding:9px 12px;
   }
   .tk-hint[hidden]{display:none}
+
+  .tk-row .next-tag{
+    font-size:10.5px;padding:1px 7px;border-radius:5px;
+    background:#EAF6F2;color:#0F766E;border:1px solid #BFE3DA;
+  }

@@ -507,6 +507,7 @@ function renderTicketList() {
     return;
   }
 
+  const nextCode = nextRecommended();
   box.innerHTML = exams.map((e) => {
     const color = DEPT_COLOR[e.department] || "#8899AA";
     const dp = `<span class="dp"><i class="dot" style="background:${color}"></i>${esc(e.department)}</span>`;
@@ -526,7 +527,7 @@ function renderTicketList() {
     return `<button class="tk-row ${on ? "on" : ""}" data-code="${e.code}">
       <div class="tk-ord">${e.order || "·"}</div>
       <div class="tk-main">
-        <div class="tk-name">${esc(e.name)}${dp}</div>
+        <div class="tk-name">${esc(e.name)}${dp}${e.code === nextCode ? '<span class="next-tag">建议先挂</span>' : ""}</div>
         <div class="tk-meta">
           当前叫到 <b>${e.serving_no == null ? "–" : e.serving_no}</b> 号 ·
           排队 <b>${e.queue_length}</b> 人 / 约 ${Math.round(e.wait_minutes)} 分 ·
@@ -588,23 +589,52 @@ function collisionHint() {
 }
 
 /** 用户点选的先后是否与推荐顺序一致（只比较被选中的那几项） */
+/**
+ * 是否按推荐路线挂号。
+ *
+ * 判定口径是「前缀」：必须从推荐顺序的第一项开始，按顺序依次挂。
+ * 只挂第 2 项、或跳着挂第 1 和第 3 项，都算偏离——因为号是按时序发的，
+ * 跳过前面的项会让后面那项的号过早被叫到。
+ */
 function followsRecommendation(selected) {
-  const rec = (ticketPage && ticketPage.recommended_order) || [];
-  const filtered = rec.filter((c) => selected.includes(c));
-  if (!filtered.length) return true;
-  return filtered.length === selected.length &&
-    filtered.every((c, i) => c === selected[i]);
+  const tp = ticketPage || {};
+  const taken = new Set((tp.exams || []).filter((e) => e.taken).map((e) => e.code));
+  const rec = (tp.recommended_order || []).filter((c) => !taken.has(c));
+  if (!rec.length) return true;
+  if (selected.length > rec.length) return false;
+  return selected.every((c, i) => c === rec[i]);
+}
+
+/** 推荐路线里「接下来该挂的那一项」 */
+function nextRecommended() {
+  const tp = ticketPage || {};
+  const taken = new Set((tp.exams || []).filter((e) => e.taken).map((e) => e.code));
+  return (tp.recommended_order || []).filter((c) => !taken.has(c))[0] || null;
 }
 
 function showOrderModal() {
   const nm = (c) => (BY_CODE[c] || {}).name || c;
-  const rec = ((ticketPage && ticketPage.recommended_order) || [])
-    .filter((c) => ticketSelected.includes(c));
+  const tp = ticketPage || {};
+  const taken = new Set((tp.exams || []).filter((e) => e.taken).map((e) => e.code));
+  const rec = (tp.recommended_order || []).filter((c) => !taken.has(c));
+  const expect = nextRecommended();
+  const firstIdx = rec.indexOf(ticketSelected[0]);
+  const skipped = firstIdx > 0 ? rec.slice(0, firstIdx) : [];
+
+  const reasons = [];
+  if (expect && ticketSelected[0] !== expect) {
+    reasons.push(`推荐先挂 <b>${esc(nm(expect))}</b>，您先挂的是 <b>${esc(nm(ticketSelected[0]))}</b>`);
+  }
+  if (skipped.length) {
+    reasons.push(`跳过了 <b>${esc(skipped.map(nm).join("、"))}</b>`);
+  }
+
   $("orderModalText").innerHTML =
     `推荐顺序是 <b>${esc(rec.map(nm).join(" → "))}</b>，` +
-    `您当前的挂号顺序是 <b>${esc(ticketSelected.map(nm).join(" → "))}</b>。<br>` +
-    `继续挂号后这些号就固定了，剩下没挂的项目我们会重新优化路线，` +
-    `但整体耗时会比按推荐顺序更长。`;
+    `您的挂号顺序是 <b>${esc(ticketSelected.map(nm).join(" → "))}</b>。<br>` +
+    (reasons.length ? reasons.join("；") + "。<br>" : "") +
+    `号是按时序发的，先挂哪一项直接影响它被叫到的时间。继续挂号后这些号就固定了，` +
+    `剩下没挂的项目我们会重新优化路线，但总耗时会比按推荐顺序更长。`;
   $("orderModal").hidden = false;
 }
 
