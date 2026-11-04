@@ -965,7 +965,7 @@ function renderResult(d) {
   box.innerHTML = `
     ${remindHtml}
     <div class="panel-head" style="margin-bottom:14px">
-      <h2>推荐路线（预估）</h2>
+      <h2>推荐路线（预估）</h2>${steps.some((s) => s.ticket) ? '<span class="reorder-tag">已按挂号重排</span>' : ""}
       <span class="spacer"></span>
       <span class="hint">按医嘱生成，时间随队列变化</span>
     </div>

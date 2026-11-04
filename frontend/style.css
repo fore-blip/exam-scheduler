@@ -477,3 +477,14 @@
     font-size:10.5px;padding:1px 7px;border-radius:5px;
     background:#EAF6F2;color:#0F766E;border:1px solid #BFE3DA;
   }
+
+  .build{
+    text-align:center;font-size:11px;color:var(--faint);
+    padding:0 0 26px;letter-spacing:.3px;user-select:all;
+  }
+
+  /* 路线标题旁的「已按挂号重排」标记 */
+  .reorder-tag{
+    font-size:11px;font-weight:500;padding:2px 8px;border-radius:6px;
+    background:#E9F5F2;color:#0F766E;border:1px solid #BFE3DA;margin-left:8px;
+  }
