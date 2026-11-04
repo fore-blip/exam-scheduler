@@ -35,6 +35,10 @@ let rx = null;                        // 医嘱
 let regDept = "";                     // 表单里选中的科室
 let planSig = "";                     // 上次渲染的方案指纹，避免无谓重绘
 
+/* ---------------- 挂号页状态 ---------------- */
+let ticketPage = null;                // 挂号页数据（项目、队列、推荐顺序）
+let ticketSelected = [];              // 按点击先后记录的检查编码
+
 /* ---------------- 医生端状态 ---------------- */
 let doctorDept = null;
 let patients = [];
@@ -88,6 +92,7 @@ function parseRoute() {
   const raw = location.pathname.replace(/\/+$/, "");
   const p = raw === "" ? "/" : raw;
   if (p === "/" || p === "/patient") return { view: "patient" };
+  if (p === "/patient/tickets") return { view: "tickets" };
   if (p === "/doctor") return { view: "doctor", dept: "" };
   const m = p.match(/^\/doctor\/([\w-]+)$/);
   if (m) return { view: "doctor", dept: m[1] };
@@ -113,17 +118,23 @@ document.addEventListener("click", (e) => {
 async function renderRoute() {
   route = parseRoute();
   $("viewPatient").hidden = route.view !== "patient";
+  $("viewTickets").hidden = route.view !== "tickets";
   $("viewDoctor").hidden = route.view !== "doctor";
   $("viewNotFound").hidden = route.view !== "notfound";
 
   document.querySelectorAll("#viewTabs a").forEach((a) => {
     const isUserTab = a.dataset.view === "user";
-    a.classList.toggle("on", isUserTab ? route.view === "patient" : route.view === "doctor");
+    a.classList.toggle("on", isUserTab
+      ? (route.view === "patient" || route.view === "tickets")
+      : route.view === "doctor");
   });
 
   if (route.view === "patient") {
     document.title = "患者端 · 门诊检查路线规划";
     await renderPatient();
+  } else if (route.view === "tickets") {
+    document.title = "挂号 · 门诊检查路线规划";
+    await renderTicketsPage();
   } else if (route.view === "doctor") {
     document.title = "医生端 · 门诊检查路线规划";
     await renderDoctor();
@@ -198,6 +209,10 @@ async function poll() {
     if (route.view === "doctor" && route.dept) {
       // 医生端低频刷新，能看到新挂号的患者
       if (tickCount % 2 === 0) await loadDeptPatients(true);
+    }
+    if (route.view === "tickets" && myId) {
+      // 挂号页的排队数字跟队列一起走
+      if (tickCount % 2 === 0) await refreshTicketsQuiet();
     }
   }
 
@@ -411,17 +426,26 @@ async function refreshMyStatus() {
 
 function renderRx() {
   $("rxPanel").hidden = false;
+  const taken = (myPatient && myPatient.tickets) || {};
+
   $("rxItems").innerHTML = (rx.items || []).map((c) => {
     const e = BY_CODE[c] || { name: c, department: "—" };
     const color = DEPT_COLOR[e.department] || "#8899AA";
+    const tk = taken[c];
     return `<div class="rx-item">
       <span class="nm">${esc(e.name)}</span>
       <span class="dp"><i class="dot" style="background:${color};margin-right:4px"></i>${esc(e.department)}</span>
+      ${tk ? `<span class="tk-tag">${tk} 号</span>` : ""}
     </div>`;
   }).join("");
   $("rxMeta").textContent =
     rx.patient_name + " · " + rx.department + " · " + rx.doctor +
     (rx.created_at ? " · 开单于 " + rx.created_at : "");
+
+  const remaining = (rx.items || []).filter((c) => !(c in taken));
+  const btn = $("goTickets");
+  btn.textContent = remaining.length ? `去挂号（${remaining.length} 项）` : "已全部挂号";
+  btn.disabled = remaining.length === 0;
 }
 
 async function run() {
@@ -430,13 +454,184 @@ async function run() {
   try {
     const d = await postJSON("/api/recommend", { patient_id: pid });
     if (!rx || rx.patient_id !== pid) return;
-    const sig = (d.feasible ? (d.order || []).join("|") : "x") + "@" + Math.round(d.total_minutes);
+    // 指纹要包含每个号的状态：只比「顺序 + 总时长」会漏掉「刚挂了号但方案时长没变」的情况，
+    // 那样页面会停在旧结果上，看起来像取号没生效。
+    const sig = d.feasible
+      ? (d.steps || []).map((s) => `${s.code}:${s.ticket || "-"}${s.missed ? "!" : ""}`).join("|")
+        + "@" + Math.round(d.total_minutes)
+      : "x";
     if (sig === planSig) return;          // 方案没变就不重绘，避免每 3 秒闪一下
     planSig = sig;
     renderResult(d);
   } catch (e) {
     $("result").innerHTML = '<div class="alert"><b>生成路线失败</b>' + esc(e.message) + "</div>";
     $("result").classList.add("show");
+  }
+}
+
+/* ==================== 挂号页 ==================== */
+
+async function renderTicketsPage() {
+  if (!myId) { await navigate("/"); return; }
+  try {
+    ticketPage = await api("/api/patient/" + encodeURIComponent(myId) + "/tickets",
+                            { cache: "no-store" });
+  } catch (e) {
+    toast("读取挂号信息失败：" + e.message);
+    await navigate("/");
+    return;
+  }
+  // 已经挂过的从选中列表里剔除
+  ticketSelected = ticketSelected.filter((c) =>
+    (ticketPage.exams || []).some((x) => x.code === c && !x.taken));
+  renderTicketList();
+}
+
+async function refreshTicketsQuiet() {
+  if (!myId) return;
+  try {
+    ticketPage = await api("/api/patient/" + encodeURIComponent(myId) + "/tickets",
+                           { cache: "no-store" });
+    renderTicketList();
+  } catch (e) { /* 下一轮再试 */ }
+}
+
+function renderTicketList() {
+  const box = $("tkList");
+  const exams = (ticketPage && ticketPage.exams) || [];
+
+  if (!exams.length) {
+    box.innerHTML = '<div class="empty"><b>没有需要挂号的检查</b><p>请先在医生端开具检查单。</p></div>';
+    $("ticketCount").textContent = "已选 0 项";
+    $("tkSubmit").disabled = true;
+    return;
+  }
+
+  box.innerHTML = exams.map((e) => {
+    const color = DEPT_COLOR[e.department] || "#8899AA";
+    const dp = `<span class="dp"><i class="dot" style="background:${color}"></i>${esc(e.department)}</span>`;
+    if (e.taken) {
+      return `<div class="tk-row done">
+        <div class="tk-ord">${e.order || "·"}</div>
+        <div class="tk-main">
+          <div class="tk-name">${esc(e.name)}${dp}</div>
+          <div class="tk-meta">已挂号，无需重复取号</div>
+        </div>
+        <span class="tk-taken">${e.ticket} 号</span>
+      </div>`;
+    }
+    const on = ticketSelected.includes(e.code);
+    const now = (e.next_ticket == null) ? "–" : e.next_ticket;
+    const eta = (e.call_eta == null) ? "" : `（约 ${Math.round(e.call_eta)} 分后叫到）`;
+    return `<button class="tk-row ${on ? "on" : ""}" data-code="${e.code}">
+      <div class="tk-ord">${e.order || "·"}</div>
+      <div class="tk-main">
+        <div class="tk-name">${esc(e.name)}${dp}</div>
+        <div class="tk-meta">
+          当前叫到 <b>${e.serving_no == null ? "–" : e.serving_no}</b> 号 ·
+          排队 <b>${e.queue_length}</b> 人 / 约 ${Math.round(e.wait_minutes)} 分 ·
+          现在取号≈<b>${now}</b> 号${eta}
+        </div>
+      </div>
+      <span class="tk-tick"></span>
+    </button>`;
+  }).join("");
+
+  box.querySelectorAll("button[data-code]").forEach((el) => {
+    el.onclick = () => {
+      const c = el.dataset.code;
+      const i = ticketSelected.indexOf(c);
+      if (i >= 0) ticketSelected.splice(i, 1);
+      else ticketSelected.push(c);          // 记录点击先后，这就是挂号顺序
+      renderTicketList();
+    };
+  });
+
+  const left = exams.filter((e) => !e.taken).length;
+  $("ticketCrumbHint").textContent = left
+    ? `还有 ${left} 项未挂号 · 推荐顺序见左侧编号`
+    : "全部项目已挂号";
+  $("ticketCount").textContent = `已选 ${ticketSelected.length} 项`;
+  $("tkSubmit").disabled = ticketSelected.length === 0;
+  $("tkSubmit").textContent = ticketSelected.length
+    ? `确认挂号（${ticketSelected.length} 项）` : "确认挂号";
+
+  // 一次挂多个号时，两个号可能同时被叫到——提前说清楚，别等号作废了才发现
+  const hint = collisionHint();
+  $("tkHint").hidden = !hint;
+  $("tkHint").textContent = hint;
+}
+
+/** 选中项的「取号后叫到时刻」是否挤在一起 */
+function collisionHint() {
+  const exams = (ticketPage && ticketPage.exams) || [];
+  const travel = (ticketPage && ticketPage.travel_minutes) || 4;
+  const sel = ticketSelected
+    .map((c) => exams.find((e) => e.code === c))
+    .filter((e) => e && e.call_eta != null)
+    .sort((a, b) => a.call_eta - b.call_eta);
+
+  for (let i = 1; i < sel.length; i += 1) {
+    const prev = sel[i - 1];
+    const cur = sel[i];
+    // 同科室两项是一次到场顺带做完，不算撞车
+    if (prev.department === cur.department) continue;
+    const gap = cur.call_eta - prev.call_eta;
+    const need = (prev.service_minutes || 0) + travel;
+    if (gap < need) {
+      return `「${prev.name}」与「${cur.name}」取号后的叫号时间只差约 ${Math.round(gap)} 分钟，` +
+        `而做完前一项再走到下一个科室约需 ${Math.round(need)} 分钟，可能来不及两边都到。` +
+        `建议先挂一个，等这一项做完再挂下一个。`;
+    }
+  }
+  return "";
+}
+
+/** 用户点选的先后是否与推荐顺序一致（只比较被选中的那几项） */
+function followsRecommendation(selected) {
+  const rec = (ticketPage && ticketPage.recommended_order) || [];
+  const filtered = rec.filter((c) => selected.includes(c));
+  if (!filtered.length) return true;
+  return filtered.length === selected.length &&
+    filtered.every((c, i) => c === selected[i]);
+}
+
+function showOrderModal() {
+  const nm = (c) => (BY_CODE[c] || {}).name || c;
+  const rec = ((ticketPage && ticketPage.recommended_order) || [])
+    .filter((c) => ticketSelected.includes(c));
+  $("orderModalText").innerHTML =
+    `推荐顺序是 <b>${esc(rec.map(nm).join(" → "))}</b>，` +
+    `您当前的挂号顺序是 <b>${esc(ticketSelected.map(nm).join(" → "))}</b>。<br>` +
+    `继续挂号后这些号就固定了，剩下没挂的项目我们会重新优化路线，` +
+    `但整体耗时会比按推荐顺序更长。`;
+  $("orderModal").hidden = false;
+}
+
+function submitTickets() {
+  if (!ticketSelected.length) return;
+  if (!followsRecommendation(ticketSelected)) {
+    showOrderModal();
+    return;
+  }
+  doTakeTickets();
+}
+
+async function doTakeTickets() {
+  const btn = $("tkSubmit");
+  btn.disabled = true;
+  btn.textContent = "挂号中…";
+  try {
+    const r = await postJSON(`/api/patient/${encodeURIComponent(myId)}/tickets`,
+                             { items: ticketSelected });
+    const nums = (r.issued || []).map((x) => `${x.name} ${x.ticket} 号`).join("、");
+    toast(nums ? "挂号成功：" + nums : "已完成挂号");
+    ticketSelected = [];
+    planSig = "";                       // 号变了，回去必须重绘
+    await navigate("/");
+  } catch (e) {
+    toast("挂号失败：" + e.message);
+    renderTicketList();
   }
 }
 
@@ -706,10 +901,15 @@ function renderResult(d) {
     bits.push(fmtClock(s.start_at) + "–" + fmtClock(s.finish_at));
 
     let badge = "";
-    if (s.ticket) badge = '<span class="tk-tag">' + s.ticket + " 号</span>";
-    else if (s.needs_ticket) badge = '<span class="est-tag">待取号</span>';
+    if (s.missed) {
+      badge = '<span class="est-tag warn">号已过 · 现场重取</span>';
+    } else if (s.ticket) {
+      badge = '<span class="tk-tag">' + s.ticket + " 号</span>";
+    } else if (s.needs_ticket) {
+      badge = '<span class="est-tag">待取号</span>';
+    }
     // 已标「待取号」时不再重复标「预估」，两者说的是同一件事
-    const srcTag = (s.wait_source === "ticket" || s.needs_ticket)
+    const srcTag = (s.wait_source === "ticket" || s.needs_ticket || s.missed)
       ? "" : '<span class="est-tag">预估</span>';
 
     return `<li class="step">
@@ -779,6 +979,21 @@ $("regAgain").onclick = () => {
 
 $("issue").onclick = issuePrescription;
 $("resetRx").onclick = resetDemo;
+
+$("goTickets").onclick = () => navigate("/patient/tickets");
+$("tkSubmit").onclick = submitTickets;
+
+$("orderCancel").onclick = () => { $("orderModal").hidden = true; };
+$("orderConfirm").onclick = async () => {
+  $("orderModal").hidden = true;
+  await doTakeTickets();
+};
+$("orderModal").addEventListener("click", (e) => {
+  if (e.target === $("orderModal")) $("orderModal").hidden = true;
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") $("orderModal").hidden = true;
+});
 
 $("live").onclick = () => {
   live = !live;

@@ -123,6 +123,7 @@ def _to_states(raw: Dict[str, Any], now: Optional[datetime]) -> Dict[str, Depart
             updated_at=now or SNAPSHOT_TIME,
             serving_no=None if serving is None else int(serving),
             service_minutes=None if service is None else float(service),
+            next_ticket=None if item.get("next_ticket") is None else int(item["next_ticket"]),
         )
     return states
 

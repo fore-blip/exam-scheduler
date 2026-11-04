@@ -162,6 +162,9 @@ def snapshot() -> Dict[str, Any]:
                     "wait_minutes": wait_of(dept),
                     "serving_no": int(dept["serving"]),
                     "service_minutes": float(dept["service"]),
+                    # 现在去取号机会拿到的号，患者端挂号页直接展示
+                    "next_ticket": max(int(dept.get("issued") or 0),
+                                       int(dept["serving"]) + int(dept["queue"])) + 1,
                     "updated_at": now,
                     "history": HISTORY[name][-20:],
                 }

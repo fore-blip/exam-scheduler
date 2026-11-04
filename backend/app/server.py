@@ -16,7 +16,7 @@ import os
 import webbrowser
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict
+from typing import Any, Dict, List
 from urllib.parse import urlparse
 
 from . import data_source
@@ -73,6 +73,7 @@ def build_snapshot_payload() -> Dict[str, Any]:
                 "wait_minutes": st.wait_minutes,
                 "serving_no": st.serving_no,
                 "service_minutes": st.service_minutes,
+                "next_ticket": st.next_ticket,
             }
             for dept, st in sorted(states.items(), key=lambda kv: -kv[1].wait_minutes)
         ],
@@ -99,6 +100,7 @@ def build_catalog_payload() -> Dict[str, Any]:
                 "wait_minutes": st.wait_minutes,
                 "serving_no": st.serving_no,
                 "service_minutes": st.service_minutes,
+                "next_ticket": st.next_ticket,
             }
             for dept, st in sorted(states.items(), key=lambda kv: -kv[1].wait_minutes)
         ],
@@ -139,7 +141,9 @@ def build_recommend_payload(body: Dict[str, Any]) -> Dict[str, Any]:
     fasting = bool(body.get("fasting", True))
 
     # 用户端只按医嘱执行，不自选项目
+    patient = None
     if patient_id:
+        patient = prescriptions.get_patient(patient_id)
         rx = prescriptions.get_by_patient(patient_id)
         if rx is None:
             return {
@@ -155,6 +159,10 @@ def build_recommend_payload(body: Dict[str, Any]) -> Dict[str, Any]:
 
     tickets = {str(k): int(v) for k, v in (body.get("tickets") or {}).items()
                if v not in (None, "")}
+    # 患者自己挂过的号优先：这是既成事实，不能因为请求没带就当成没挂
+    if patient:
+        for code, number in (patient.get("tickets") or {}).items():
+            tickets.setdefault(code, int(number))
     now = data_source.SNAPSHOT_TIME
     states = data_source.get_snapshot(now)
 
@@ -209,6 +217,58 @@ def build_recommend_payload(body: Dict[str, Any]) -> Dict[str, Any]:
         "queue_status": data_source.last_status(),
         "nodes": plan.nodes,
         "elapsed_ms": round(plan.elapsed_ms, 2),
+    }
+
+
+def build_tickets_payload(patient_id: str) -> Dict[str, Any]:
+    """挂号页数据：每个项目的队列现状、叫号、推荐次序、是否已取号。"""
+    patient = prescriptions.get_patient(patient_id)
+    if patient is None:
+        raise KeyError(patient_id)
+
+    plan = build_recommend_payload({"patient_id": patient_id})
+    order = [str(c) for c in (plan.get("order") or [])]
+    catalog = rules_mod.build_catalog()
+    states = data_source.get_snapshot(data_source.SNAPSHOT_TIME)
+    taken_map = patient.get("tickets") or {}
+
+    exams: List[Dict[str, Any]] = []
+    for code in prescriptions.items_of(patient_id):
+        exam = catalog.get(code)
+        if exam is None:
+            continue
+        st = states.get(exam.department)
+        taken = taken_map.get(code)
+        next_ticket = st.next_ticket if st else None
+        # 现在取号大约多久后被叫到：号差 × 人均服务时长（与求解器同口径）
+        call_eta = None
+        if (st and next_ticket is not None and st.serving_no is not None
+                and st.service_minutes):
+            call_eta = round((next_ticket - st.serving_no) * st.service_minutes, 1)
+        exams.append({
+            "code": code,
+            "name": exam.name,
+            "department": exam.department,
+            "service_minutes": exam.service_minutes,
+            "requires_fasting": exam.requires_fasting,
+            "queue_length": st.queue_length if st else 0,
+            "serving_no": st.serving_no if st else None,
+            "wait_minutes": round(st.wait_minutes, 1) if st else 0.0,
+            "next_ticket": next_ticket,
+            "call_eta": call_eta,
+            "ticket": int(taken) if taken is not None else None,
+            "taken": taken is not None,
+            "order": (order.index(code) + 1) if code in order else None,
+        })
+
+    # 未挂号的按推荐次序在前，已挂号的沉底
+    exams.sort(key=lambda x: (x["taken"], x["order"] or 999))
+    return {
+        "patient": patient,
+        "recommended_order": order,
+        "remaining": len([e for e in exams if not e["taken"]]),
+        "travel_minutes": rules_mod.TRAVEL_MINUTES,
+        "exams": exams,
     }
 
 
@@ -282,6 +342,17 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
+        # 挂号页：剩余项目 + 各科室叫号情况（注意要排在 /api/patient/<pid> 之前）
+        if route.startswith("/api/patient/") and route.endswith("/tickets"):
+            pid = route[len("/api/patient/"):-len("/tickets")].strip("/")
+            try:
+                self._send_json(200, build_tickets_payload(pid))
+            except KeyError:
+                self._send_json(404, {"error": f"未找到患者：{pid}"})
+            except Exception as exc:
+                self._send_json(500, {"error": f"读取挂号信息失败：{exc}"})
+            return
+
         # 患者端：自己的就诊记录 + 医嘱
         if route.startswith("/api/patient/"):
             pid = route[len("/api/patient/"):].strip("/")
@@ -328,8 +399,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         route = urlparse(self.path).path
-        if route not in ("/api/recommend", "/api/take", "/api/register",
-                         "/api/prescription", "/api/prescription/reset"):
+        is_ticket_route = route.startswith("/api/patient/") and route.endswith("/tickets")
+        if not is_ticket_route and route not in (
+                "/api/recommend", "/api/take", "/api/register",
+                "/api/prescription", "/api/prescription/reset"):
             self._send_json(404, {"error": "未找到该路径"})
             return
 
@@ -339,6 +412,21 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(raw or b"{}")
         except json.JSONDecodeError:
             self._send_json(400, {"error": "请求体不是合法 JSON"})
+            return
+
+        # 挂号：按 items 的先后顺序逐个取号，这个顺序就是「挂号顺序」
+        if is_ticket_route:
+            pid = route[len("/api/patient/"):-len("/tickets")].strip("/")
+            items = [str(i) for i in (body.get("items") or []) if i]
+            if not items:
+                self._send_json(400, {"error": "请至少选择一个检查项目"})
+                return
+            try:
+                self._send_json(200, prescriptions.take_tickets(pid, items))
+            except KeyError:
+                self._send_json(404, {"error": f"未找到患者：{pid}"})
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
             return
 
         if route == "/api/register":

@@ -27,6 +27,7 @@ from .models import Dependency, Exam, Plan, PlanStep, TimeWindow
 
 INF = float("inf")
 TIE_WINDOW = 1.0   # 分钟。完成时间差异在此范围内时，按推荐稳定性择优
+HONOR_SLACK = 3.0  # 分钟。为「不浪费已取到的号」最多允许多花的时间
 
 
 @dataclass
@@ -321,8 +322,10 @@ class ExamScheduler:
                 if code in self._index:
                     ref_pos[self._index[code]] = pos
 
-        best: Dict[str, object] = {"finish": INF, "order": None, "path": None}
+        best: Dict[str, object] = {"finish": INF, "order": None, "path": None, "missed": 0}
         alt: Dict[str, object] = {"dev": None, "finish": INF, "order": None, "path": None}
+        # 备选：优先「不浪费已取到的号」的方案。只有当它不比最快方案慢太多时才采用。
+        honor: Dict[str, object] = {"missed": None, "finish": INF, "order": None, "path": None}
         stats = {"nodes": 0, "timeout": False, "node_limit": False}
         deadline = t_begin + time_limit
 
@@ -363,10 +366,22 @@ class ExamScheduler:
             return bound
 
         def record(now: float) -> None:
+            miss = sum(1 for s in path if s.missed)
+
+            # 记录「浪费号最少」的方案。最终是否采用还要看它比最快方案慢多少，
+            # 因为剪枝放宽了 HONOR_SLACK，这里可能收到略慢但有价值的解。
+            if (honor["missed"] is None or miss < honor["missed"]        # type: ignore[operator]
+                    or (miss == honor["missed"] and now < honor["finish"])):  # type: ignore[operator]
+                honor["missed"] = miss
+                honor["finish"] = now
+                honor["order"] = list(order)
+                honor["path"] = list(path)
+
             if now < best["finish"] - 1e-9:          # type: ignore[operator]
                 best["finish"] = now
                 best["order"] = list(order)
                 best["path"] = list(path)
+                best["missed"] = miss
                 alt["dev"] = None
                 alt["order"] = None
                 alt["path"] = None
@@ -394,7 +409,8 @@ class ExamScheduler:
                 record(now)
                 return
 
-            if lower_bound(now, remaining) >= best["finish"] - 1e-9:   # type: ignore[operator]
+            # 放宽 HONOR_SLACK：略慢但能保住已取号的方案也要被搜到
+            if lower_bound(now, remaining) >= best["finish"] + HONOR_SLACK - 1e-9:   # type: ignore[operator]
                 return
 
             cands: List[_Candidate] = []
@@ -426,7 +442,13 @@ class ExamScheduler:
 
         chosen: Dict[str, object] = best
         stability_applied = False
-        if alt["order"] is not None and best["order"] is not None:
+        honored = False
+        if (honor["order"] is not None and best["order"] is not None
+                and honor["missed"] < best["missed"]                                  # type: ignore[operator]
+                and honor["finish"] <= best["finish"] + HONOR_SLACK + 1e-9):          # type: ignore[operator]
+            chosen = honor
+            honored = True
+        elif alt["order"] is not None and best["order"] is not None:
             dev_best = _deviation(best["order"], ref_pos) if ref_pos else 0  # type: ignore[arg-type]
             if alt["dev"] is not None and alt["dev"] < dev_best:             # type: ignore[operator]
                 chosen = alt
@@ -456,6 +478,15 @@ class ExamScheduler:
             nodes=stats["nodes"],
             elapsed_ms=elapsed_ms,
         )
+        if honored:
+            extra = float(chosen["finish"]) - float(best["finish"])   # type: ignore[arg-type]
+            if extra > 0.05:
+                plan.notes.append(
+                    f"已优先保留取到的号：方案比最快顺序多 {extra:.0f} 分钟，"
+                    f"但避免了号作废后重新排队"
+                )
+            else:
+                plan.notes.append("已优先按取到的号安排，避免号作废后重新排队")
         if stability_applied:
             plan.notes.append(
                 f"存在完成时间差异不足 {TIE_WINDOW:.0f} 分钟的其他方案，已按"

@@ -17,6 +17,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from . import data_source
 from . import rules
 from .models import Patient, Prescription
 
@@ -75,6 +76,7 @@ def _to_dict(p: Patient) -> dict:
         "chief_complaint": p.chief_complaint,
         "status": p.status,
         "prescription": rx.to_dict() if rx else None,
+        "tickets": dict(p.tickets),
     }
 
 
@@ -163,6 +165,62 @@ def issue(patient_id: str, items: List[str], doctor: str = "门诊医生",
     patient.status = "issued"
     patient.prescription_id = rx.prescription_id
     return rx
+
+
+def items_of(patient_id: str) -> List[str]:
+    """医嘱里的全部检查项目（保持开单顺序）。"""
+    rx = get_by_patient(patient_id)
+    return list(rx.items) if rx else []
+
+
+def remaining_items(patient_id: str) -> List[str]:
+    """还没取号的检查项目。"""
+    p = _PATIENTS.get(patient_id)
+    if p is None:
+        return []
+    rx = _PRESCRIPTIONS.get(p.prescription_id) if p.prescription_id else None
+    if rx is None:
+        return []
+    return [c for c in rx.items if c not in p.tickets]
+
+
+def take_tickets(patient_id: str, items: List[str]) -> Dict[str, object]:
+    """按给定顺序为若干检查项目取号——每个项目一个号。
+
+    号由叫号系统按科室发放，同一科室连续取会拿到相邻号；
+    `items` 的先后决定了号的先后，这正是「挂号顺序」的含义。
+    """
+    p = _PATIENTS.get(patient_id)
+    if p is None:
+        raise KeyError(f"未知患者：{patient_id}")
+
+    catalog = rules.build_catalog()
+    allowed = set(remaining_items(patient_id))
+    issued: List[dict] = []
+
+    for raw in items:
+        code = str(raw)
+        if code not in allowed:
+            continue                      # 已取过或不在医嘱里，跳过
+        exam = catalog.get(code)
+        if exam is None:
+            continue
+        res = data_source.take_ticket(exam.department)
+        if not res.get("ok"):
+            raise ValueError(res.get("error") or f"{exam.name} 取号失败")
+        ticket = int(res["ticket"])
+        p.tickets[code] = ticket
+        issued.append({
+            "code": code,
+            "name": exam.name,
+            "department": exam.department,
+            "ticket": ticket,
+            "serving_no": res.get("serving_no"),
+            "ahead": res.get("ahead"),
+            "wait_minutes": res.get("wait_minutes"),
+        })
+
+    return {"tickets": dict(p.tickets), "issued": issued}
 
 
 def get_by_patient(patient_id: str) -> Optional[Prescription]:

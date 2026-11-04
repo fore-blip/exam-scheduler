@@ -326,6 +326,7 @@
     margin-left:6px;font-weight:400;
   }
   .tk-tag{font-size:10.5px;padding:1px 6px;border-radius:4px;background:#E9F5F2;color:#0F766E;margin-left:6px}
+  .est-tag.warn{background:#FEF3C7;color:#B45309}
 
   /* ==================== 挂号与就诊 ==================== */
 
@@ -401,3 +402,73 @@
     .field.submit .btn{width:100%}
     .visit-state{margin-left:0;width:100%}
   }
+
+  /* ==================== 挂号页 ==================== */
+
+  .tk-list{display:flex;flex-direction:column;gap:9px}
+  .tk-row{
+    display:flex;align-items:center;gap:14px;
+    border:1px solid var(--line);border-radius:11px;background:#FBFCFD;
+    padding:12px 14px;cursor:pointer;transition:.15s;text-align:left;width:100%;
+  }
+  .tk-row:hover{border-color:var(--accent-line);background:#fff}
+  .tk-row.on{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 0 0 1px var(--accent) inset}
+  .tk-row.done{background:#F6F8FA;cursor:default;opacity:.85}
+  .tk-row.done:hover{border-color:var(--line);background:#F6F8FA}
+
+  .tk-ord{
+    flex:0 0 30px;height:30px;border-radius:9px;background:#EEF2F7;color:#5A6B7F;
+    display:flex;align-items:center;justify-content:center;
+    font-size:13px;font-weight:600;
+  }
+  .tk-row.on .tk-ord{background:var(--accent);color:#fff}
+  .tk-row.done .tk-ord{background:#E3E8EF;color:#8A96A3}
+
+  .tk-main{flex:1 1 auto;min-width:0}
+  .tk-name{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .tk-name .dp{font-size:11.5px;font-weight:400;color:var(--muted);display:inline-flex;align-items:center;gap:5px}
+  .tk-meta{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.6}
+  .tk-meta b{color:var(--text);font-weight:600}
+  .tk-meta .warn{color:var(--warn)}
+
+  .tk-tick{
+    flex:0 0 20px;width:20px;height:20px;border-radius:6px;border:1.5px solid #CBD3DD;background:#fff;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .tk-row.on .tk-tick{background:var(--accent);border-color:var(--accent)}
+  .tk-row.on .tk-tick::after{content:"";width:9px;height:5px;border-left:2px solid #fff;
+    border-bottom:2px solid #fff;transform:rotate(-45deg) translate(1px,-1px)}
+  .tk-row.done .tk-tick{border-color:transparent;background:transparent}
+  .tk-taken{font-size:12px;font-weight:600;color:#0F766E;white-space:nowrap}
+
+  /* ==================== 确认弹窗 ==================== */
+
+  .modal{
+    position:fixed;inset:0;z-index:60;background:rgba(22,32,44,.42);
+    display:flex;align-items:center;justify-content:center;padding:24px;
+    animation:fadein .16s ease both;
+  }
+  .modal[hidden]{display:none}
+  @keyframes fadein{from{opacity:0}to{opacity:1}}
+  .modal-card{
+    background:#fff;border-radius:16px;padding:24px 26px;max-width:460px;width:100%;
+    box-shadow:0 20px 50px rgba(15,23,42,.26);animation:pop .18s ease both;
+  }
+  @keyframes pop{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
+  .modal-card h3{
+    margin:0 0 10px;font-size:16px;font-weight:600;color:var(--text);
+    display:flex;align-items:center;gap:9px;
+  }
+  .modal-card h3::before{
+    content:"!";width:20px;height:20px;border-radius:50%;background:#D97706;color:#fff;
+    font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;
+  }
+  .modal-card p{margin:0;font-size:13px;color:var(--muted);line-height:1.8}
+  .modal-card p b{color:var(--text);font-weight:600}
+  .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+
+  .tk-hint{
+    margin-top:12px;font-size:12.5px;color:#8A4B08;line-height:1.7;
+    background:#FFF9EC;border:1px solid #F0C679;border-radius:9px;padding:9px 12px;
+  }
+  .tk-hint[hidden]{display:none}

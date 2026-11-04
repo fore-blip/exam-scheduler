@@ -78,7 +78,7 @@
         <h2>医生开具的检查</h2>
         <span class="hint" id="rxMeta"></span>
         <span class="spacer"></span>
-        <span class="hint">按清单执行，不可自选</span>
+        <button class="btn primary" id="goTickets">去挂号</button>
       </div>
       <div class="rx-items" id="rxItems"></div>
     </section>
@@ -94,6 +94,32 @@
         <span class="live" id="live" title="点击暂停 / 继续实时刷新"><i></i><span id="liveText">实时</span></span>
       </div>
       <div class="dept-row" id="depts"></div>
+    </section>
+  </section>
+
+  <!-- ==================== 挂号页 ==================== -->
+  <section id="viewTickets" hidden>
+    <nav class="crumb">
+      <a href="/">← 返回我的就诊</a>
+      <span>挂号</span>
+      <span class="spacer"></span>
+      <span class="hint" id="ticketCrumbHint">按推荐顺序挂号可减少等待</span>
+    </nav>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>需要挂号的检查</h2>
+        <span class="hint">每项一个号；同一科室连取会拿到相邻号</span>
+        <span class="spacer"></span>
+        <span class="hint" id="ticketCount">已选 0 项</span>
+      </div>
+
+      <div class="tk-list" id="tkList"></div>
+      <div class="tk-hint" id="tkHint" hidden></div>
+
+      <div class="actions">
+        <button class="btn primary" id="tkSubmit" disabled>确认挂号</button>
+      </div>
     </section>
   </section>
 
@@ -153,6 +179,18 @@
 </main>
 
 <div class="toast" id="toast"></div>
+
+<!-- 挂号顺序确认弹窗 -->
+<div class="modal" id="orderModal" hidden>
+  <div class="modal-card">
+    <h3>您当前的挂号可能不是最优顺序</h3>
+    <p id="orderModalText"></p>
+    <div class="modal-actions">
+      <button class="btn" id="orderCancel">重新选择</button>
+      <button class="btn primary" id="orderConfirm">仍要继续挂号</button>
+    </div>
+  </div>
+</div>
 
 <script src="/app.js"></script>
 </body>

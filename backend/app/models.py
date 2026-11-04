@@ -69,6 +69,8 @@ class Patient:
     created_at: Optional[datetime] = None
     status: str = "waiting"    # waiting=待开单 / issued=已开单
     prescription_id: Optional[str] = None
+    # 已取到的号：检查编码 -> 号（挂号粒度是「每个检查项目一个号」）
+    tickets: Dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,7 @@ class DepartmentState:
     updated_at: Optional[datetime] = None
     serving_no: Optional[int] = None          # 当前叫号（取号模式必需）
     service_minutes: Optional[float] = None    # 人均服务时长（取号模式必需）
+    next_ticket: Optional[int] = None          # 此刻去取号会拿到的号
 
 
 @dataclass(frozen=True)
