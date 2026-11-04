@@ -37,6 +37,43 @@ def _dedup(seq: Sequence[str]) -> List[str]:
     return out
 
 
+def split_ticket_block(
+    exams: Sequence[Exam],
+    dependencies: Sequence,
+    tickets: Dict[str, int],
+    completed: Dict[str, float],
+) -> Tuple[List[str], List[Tuple[str, List[str]]]]:
+    """把已取号的项目切成「能排最前的一块」+「不得不降级的零头」。
+
+    口径（与产品定义一致）：
+
+    * 号在手里、且它在待检列表里的前置也都挂了号 → 属于已挂号块。
+      块内顺序由求解器重新优化，但整块一定排在所有未挂号项目之前。
+    * 前置没挂号（例：挂了心脏彩超的号，但心电图还没挂）→ 物理上排不到最前，
+      降到后面的块。号仍然保留，按叫号时刻判断能不能赶上，赶不上就现场重取。
+
+    返回 (块内编码列表, [(降级编码, 缺的前置编码列表), ...])。
+    """
+    in_plan = {e.code for e in exams}
+    prereq: Dict[str, List[str]] = {}
+    for dep in dependencies:
+        if dep.after in in_plan and dep.before in in_plan:
+            prereq.setdefault(dep.after, []).append(dep.before)
+
+    block = {c for c in tickets if c in in_plan}
+    demoted: List[Tuple[str, List[str]]] = []
+    changed = True
+    while changed:
+        changed = False
+        for code in sorted(block):
+            missing = [p for p in prereq.get(code, []) if p not in block and p not in completed]
+            if missing:
+                block.discard(code)
+                demoted.append((code, missing))
+                changed = True
+    return [e.code for e in exams if e.code in block], demoted
+
+
 def _prepare(
     exam_codes: Sequence[str],
     *,
@@ -107,16 +144,21 @@ def _prepare(
                                buffer=rules_mod.ESTIMATE_BUFFER)
     windows = _shift_windows(rules_mod.build_windows(), now.hour * 60 + now.minute)
 
+    dependencies = rules_mod.build_dependencies()
+    block, demoted = split_ticket_block(exams, dependencies, clean_tickets, completed or {})
+
     scheduler = ExamScheduler(
         exams,
-        rules_mod.build_dependencies(),
+        dependencies,
         windows,
         estimator,
         start_time=start_offset,
         completed=completed or {},
         tickets=clean_tickets,
         travel_minutes=rules_mod.TRAVEL_MINUTES,
+        ticket_block=block,
     )
+    scheduler.demoted_tickets = demoted      # 供 recommend 生成说明
     return scheduler, None
 
 
@@ -227,31 +269,58 @@ def recommend(
     assert scheduler is not None
     plan = scheduler.solve(reference_order=reference_order, time_limit=time_limit)
 
-    # 「已取号的项目先做」可能因为前置依赖无法成立（例如挂了心脏彩超的号，
-    # 但它要先有心电图结果）。这时退回全局最优，而不是直接判不可行。
-    if not plan.feasible and scheduler.tickets and scheduler.tickets_first:
-        scheduler.tickets_first = False
+    # 兜底：已挂号块本身排不下（块的时段已过、块内互相卡死）才退回单一序列。
+    # 正常情况不会走到这里——降级已经在 _prepare 里按前置关系处理掉了。
+    block_dropped = False
+    if not plan.feasible and scheduler.ticket_block:
+        scheduler.set_ticket_block(set())
         plan = scheduler.solve(reference_order=reference_order, time_limit=time_limit)
-        if plan.feasible:
-            plan.notes.append(
-                "已取号的项目之间存在前置依赖，无法全部排在最前，"
-                "方案改为全局最优；个别号可能会作废，具体见下方说明"
-            )
+        block_dropped = plan.feasible
 
     if not plan.feasible:
         detail = _format_ticket_conflicts(scheduler, now)
         if detail:
             plan.conflicts = detail      # 有具体冲突时，替掉"找不到可行顺序"这种笼统提示
-    elif scheduler.tickets:
-        if scheduler.tickets_first and len(scheduler.tickets) < len(scheduler.exams):
+    else:
+        # 路线前 N 步就是已挂号块，前端据此分段展示
+        split = 0
+        for step in plan.steps:
+            if step.exam.code in scheduler.ticket_block:
+                split += 1
+            else:
+                break
+        plan.block_split = split
+
+        if scheduler.tickets:
+            total = len(plan.steps)
+            if block_dropped:
+                plan.notes.append(
+                    "已挂号的项目按号排不进最前（时段或前置条件不允许），"
+                    "方案退回全局最优；个别号可能作废，具体见下方提示"
+                )
+            elif split and split < total:
+                plan.notes.append(
+                    f"已挂号的 {split} 项排在最前（组内按最优顺序重新排列），"
+                    f"其余 {total - split} 项在其后单独优化"
+                )
+            elif split and split == total:
+                plan.notes.append("全部项目都已挂号，按现有号重新优化执行顺序")
             plan.notes.append(
-                "路线已按「先做已取号的检查」重新排列：已挂号的项目排在前面"
-                "（组内仍按最优顺序），其余项目在其后重新优化"
+                "已按取号计算：各步开始时间由该号被叫到的时刻决定，"
+                "按时到场即可，早到只会站着多等"
             )
-        plan.notes.append(
-            "已按取号计算：各步开始时间由该号被叫到的时刻决定，"
-            "按时到场即可，早到只会站着多等"
-        )
+            demoted = getattr(scheduler, "demoted_tickets", [])
+            if demoted and not block_dropped:
+                catalog = rules_mod.build_catalog()
+                names = "、".join(
+                    f"「{catalog[c].name}」（需先做{'、'.join(catalog[p].name for p in pre if p in catalog)}）"
+                    for c, pre in demoted
+                    if c in catalog
+                )
+                plan.notes.append(
+                    f"{names} 的前置检查还没挂号，无法排进已挂号块，只能放到后面；"
+                    f"做完前置再去本科室，号若已过现场重取即可"
+                )
 
     plan.notes.extend(_build_notes(plan, scheduler.exams, scheduler.estimator, scheduler.windows))
 

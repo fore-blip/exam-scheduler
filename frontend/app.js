@@ -458,7 +458,7 @@ async function run() {
     // 那样页面会停在旧结果上，看起来像取号没生效。
     const sig = d.feasible
       ? (d.steps || []).map((s) => `${s.code}:${s.ticket || "-"}${s.missed ? "!" : ""}`).join("|")
-        + "@" + Math.round(d.total_minutes)
+        + "@" + Math.round(d.total_minutes) + "#" + (d.ticket_block_size || 0)
       : "x";
     if (sig === planSig) return;          // 方案没变就不重绘，避免每 3 秒闪一下
     planSig = sig;
@@ -923,7 +923,10 @@ function renderResult(d) {
     '<span><i style="background:' + (DEPT_COLOR[dept] || "#8899AA") + '"></i>' +
     esc(dept) + "</span>").join("");
 
-  const stepsHtml = steps.map((s, i) => {
+  // 已挂号块：路线前 N 步。块内是重新优化过的顺序，整块一定排在未挂号项目之前。
+  const split = Math.min(d.ticket_block_size || 0, steps.length);
+
+  const stepRow = (s, i) => {
     const bits = [];
     if (s.travel_minutes > 0.01) bits.push("移动 " + Math.round(s.travel_minutes) + " 分");
     if (s.wait_minutes > 0.5) bits.push("排队 " + Math.round(s.wait_minutes) + " 分");
@@ -950,7 +953,18 @@ function renderResult(d) {
         ${s.reason ? '<div class="reason">' + esc(s.reason) + "</div>" : ""}
       </div>
     </li>`;
-  }).join("");
+  };
+
+  let stepsHtml = "";
+  steps.forEach((s, i) => {
+    if (split > 0 && i === 0) {
+      stepsHtml += `<li class="step-group"><b>已挂号 ${split} 项</b>组内按最优顺序排列</li>`;
+    }
+    if (split > 0 && i === split) {
+      stepsHtml += `<li class="step-group rest"><b>未挂号 ${steps.length - split} 项</b>接着从此刻起单独优化</li>`;
+    }
+    stepsHtml += stepRow(s, i);
+  });
 
   const reminders = d.reminders || [];
   const remindHtml = reminders.length
@@ -965,7 +979,7 @@ function renderResult(d) {
   box.innerHTML = `
     ${remindHtml}
     <div class="panel-head" style="margin-bottom:14px">
-      <h2>推荐路线（预估）</h2>${steps.some((s) => s.ticket) ? '<span class="reorder-tag">已按挂号重排</span>' : ""}
+      <h2>推荐路线（预估）</h2>${split > 0 ? `<span class="reorder-tag">已挂号 ${split} 项排在最前</span>` : ""}
       <span class="spacer"></span>
       <span class="hint">按医嘱生成，时间随队列变化</span>
     </div>

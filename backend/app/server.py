@@ -189,6 +189,8 @@ def build_recommend_payload(body: Dict[str, Any]) -> Dict[str, Any]:
         "total_wait": round(plan.total_wait, 1),
         "total_idle": round(plan.total_idle, 1),
         "order": plan.order(),
+        # 前 N 步属于「已挂号块」。0 表示没有已挂号项，整条路线是单一最优序列。
+        "ticket_block_size": plan.block_split,
         "steps": [
             {
                 "code": s.exam.code,

@@ -74,7 +74,7 @@ class ExamScheduler:
         completed: Optional[Dict[str, float]] = None,
         tickets: Optional[Dict[str, int]] = None,
         travel_minutes: float = 0.0,
-        tickets_first: bool = True,
+        ticket_block: Optional[Sequence[str]] = None,
     ) -> None:
         self.exams: List[Exam] = list(exams)
         self.estimator = estimator
@@ -87,12 +87,14 @@ class ExamScheduler:
         self.tickets: Dict[str, int] = {
             str(k): int(v) for k, v in (tickets or {}).items() if v is not None
         }
-        # 已取号的项必须排在前面：号已经拿到手，患者不会（也不该）先去做别的。
-        # 打开时是硬约束——搜索时只在「还没做完的已取号项」里选，
-        # 全部做完后才放开其余项目。这样自然形成「已挂号的块 + 其余项目的块」。
-        self.tickets_first = bool(tickets_first)
+        # 「已挂号块」：这些项必须在前面的位置里全部做完，才轮到未挂号的项。
+        # 候选池里只要还有块内项目，就只能从块内挑——于是自然形成两段：
+        # 已挂号块（组内最优）+ 未挂号块（组内最优）。
+        # 默认把全部已取号项视为一块；service 层会把"前置还没挂号"的项剔出去。
+        self.ticket_block: set[str] = set(ticket_block) if ticket_block is not None else set(self.tickets)
 
         self._index: Dict[str, int] = {e.code: i for i, e in enumerate(self.exams)}
+        self._block_idx: set[int] = self._block_index(self.ticket_block)
         self._prereq: Dict[int, List[Tuple[int, float]]] = {i: [] for i in range(len(self.exams))}
         self._external: Dict[int, List[Tuple[str, float]]] = {i: [] for i in range(len(self.exams))}
         self._missing: List[str] = []
@@ -117,6 +119,17 @@ class ExamScheduler:
             if win.exam in self._index:
                 i = self._index[win.exam]
                 self._windows[i] = (win.open_minute, win.close_minute)
+
+    # ------------------------------------------------------------------
+    # 已挂号块
+    # ------------------------------------------------------------------
+    def _block_index(self, codes: Sequence[str] | set[str]) -> set[int]:
+        return {self._index[c] for c in codes if c in self._index}
+
+    def set_ticket_block(self, codes: Sequence[str] | set[str]) -> None:
+        """重设「已挂号块」。块为空时退化为单一全局最优序列。"""
+        self.ticket_block = set(codes)
+        self._block_idx = self._block_index(self.ticket_block)
 
     # ------------------------------------------------------------------
     # 基础模拟
@@ -418,11 +431,11 @@ class ExamScheduler:
             if lower_bound(now, remaining) >= best["finish"] + HONOR_SLACK - 1e-9:   # type: ignore[operator]
                 return
 
-            # 已取号却没做完时，只在它们里面挑——用户手里的号是既成事实，
-            # 不能为了压缩总时长把它排到后面去作废。
+            # 已挂号块还没做完时，只在块内挑——块内怎么排由搜索决定，但整块必须在前。
+            # 块内全部做完后，其余项目再从当时的时刻起单独求最优。
             pool: List[int] = remaining
-            if self.tickets_first and self.tickets:
-                waiting = [i for i in remaining if self.exams[i].code in self.tickets]
+            if self._block_idx:
+                waiting = [i for i in remaining if i in self._block_idx]
                 if waiting:
                     pool = waiting
 

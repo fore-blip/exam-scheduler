@@ -178,6 +178,9 @@ class Plan:
     reminders: List[TicketReminder] = field(default_factory=list)
     nodes: int = 0
     elapsed_ms: float = 0.0
+    # 前 N 步属于「已挂号块」。0 表示没有已挂号项目，整条路线是单一最优序列。
+    # 展示层据此把路线切成「已挂号 / 未挂号」两段，求解本身不依赖这个字段。
+    block_split: int = 0
 
     @property
     def total_minutes(self) -> float:

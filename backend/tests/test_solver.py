@@ -145,6 +145,99 @@ class TestConstraints(unittest.TestCase):
         self.assertGreaterEqual(plan.steps[0].start_at, 5 - 1e-9)
 
 
+class TestTicketBlock(unittest.TestCase):
+    """已挂号块语义：整块排在最前，块内最优；未挂号块在其后单独最优。"""
+
+    @staticmethod
+    def _sched(exams, deps, waits, tickets, block):
+        states = [
+            DepartmentState(department=d, queue_length=10, wait_minutes=w,
+                            serving_no=100, service_minutes=5)
+            for d, w in waits.items()
+        ]
+        return ExamScheduler(
+            exams, deps, [], QueueEstimator(states),
+            tickets=tickets, ticket_block=block,
+        )
+
+    @staticmethod
+    def _brute_force_blocked(sched, codes, block):
+        """只允许「块内项目全部在前」的排列，穷举最小完成时间。"""
+        best = None
+        for perm in itertools.permutations(codes):
+            seen_rest = False
+            valid = True
+            for code in perm:
+                if code in block:
+                    if seen_rest:
+                        valid = False
+                        break
+                else:
+                    seen_rest = True
+            if not valid:
+                continue
+            plan = sched.simulate(perm)
+            if plan is not None and (best is None or plan.total_minutes < best):
+                best = plan.total_minutes
+        return best
+
+    def test_single_ticket_goes_first(self):
+        exams = [Exam("A", "A项", "甲", 10), Exam("B", "B项", "乙", 5), Exam("C", "C项", "丙", 20)]
+        sched = self._sched(exams, [], {"甲": 30, "乙": 0, "丙": 10},
+                            tickets={"C": 120}, block=["C"])
+        plan = sched.solve()
+        self.assertTrue(plan.feasible)
+        self.assertEqual(plan.order()[0], "C")
+
+    def test_multiple_tickets_form_one_prefix(self):
+        exams = [Exam(c, c, d, 5) for c, d in
+                 [("A", "甲"), ("B", "乙"), ("C", "丙"), ("D", "丁"), ("E", "甲")]]
+        waits = {"甲": 20, "乙": 5, "丙": 30, "丁": 10}
+        tickets = {"C": 130, "D": 140}
+        sched = self._sched(exams, [], waits, tickets, ["C", "D"])
+        plan = sched.solve()
+
+        self.assertTrue(plan.feasible)
+        self.assertEqual(set(plan.order()[:2]), {"C", "D"}, "已挂号项没有全部排在前面")
+        # 块内顺序 + 剩余顺序必须与「限定块在前」的穷举一致
+        self.assertAlmostEqual(
+            plan.total_minutes,
+            self._brute_force_blocked(sched, [e.code for e in exams], {"C", "D"}),
+            places=6,
+        )
+
+    def test_demoted_ticket_stays_out_of_block(self):
+        """号还在，但被 business 层剔出块：仍按号算，只是不占块内位置。"""
+        exams = [Exam("A", "A项", "甲", 10), Exam("B", "B项", "乙", 5)]
+        sched = self._sched(exams, [], {"甲": 10, "乙": 0},
+                            tickets={"A": 110, "B": 130}, block=["B"])
+        plan = sched.solve()
+        self.assertTrue(plan.feasible)
+        self.assertEqual(plan.order()[0], "B")
+
+    def test_split_block_demotes_dependent(self):
+        from backend.app.service import split_ticket_block
+
+        exams = [
+            Exam("ECG", "心电图", "心电科", 15),
+            Exam("ECHO", "心脏彩超", "超声科", 25),
+            Exam("CBC", "血常规", "检验科", 5),
+        ]
+        deps = [Dependency("R1", "ECG", "ECHO", 10)]
+
+        block, demoted = split_ticket_block(exams, deps, {"ECHO": 30, "CBC": 40}, {})
+        self.assertEqual(block, ["CBC"])
+        self.assertEqual(demoted, [("ECHO", ["ECG"])])
+
+        block, demoted = split_ticket_block(exams, deps, {"ECHO": 30, "ECG": 40}, {})
+        self.assertEqual(block, ["ECG", "ECHO"])
+        self.assertEqual(demoted, [])
+
+        # 前置已完成时不算缺
+        block, _ = split_ticket_block(exams, deps, {"ECHO": 30}, {"ECG": -5})
+        self.assertEqual(block, ["ECHO"])
+
+
 class TestGreedyCanFail(unittest.TestCase):
     def test_greedy_hits_window_optimal_does_not(self):
         """构造反例：最短等待优先会踩时间窗，最优解不会。"""
