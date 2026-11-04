@@ -214,6 +214,23 @@ class ExamScheduler:
                     travel_minutes=travel,
                 )
 
+        # 3a) 无号但同科室刚做完：一次到场可以顺带完成（检验科一次采血做多项）
+        if same_finish is not None and travel <= 1e-9:
+            start = max(max(now, release), same_finish)
+            if window is not None and start > window[1] + 1e-9:
+                return None
+            return _Candidate(
+                idx=idx,
+                arrive=start,
+                wait=0.0,
+                start=start,
+                finish=start + exam.service_minutes,
+                forced_idle=start - now,
+                shared_with=same_code,
+                wait_source="estimate",
+                travel_minutes=0.0,
+            )
+
         # 3) 未取号：按"到达即排队"估算
         arrive = max(now + travel, release)
         if window is not None and arrive < window[0]:
