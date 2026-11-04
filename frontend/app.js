@@ -956,12 +956,26 @@ function renderResult(d) {
   };
 
   let stepsHtml = "";
+  const blockSteps = steps.slice(0, split);
+  const blockTicketed = blockSteps.filter((s) => s.ticket).length;
+  const blockExtra = split - blockTicketed;
   steps.forEach((s, i) => {
     if (split > 0 && i === 0) {
-      stepsHtml += `<li class="step-group"><b>已挂号 ${split} 项</b>组内按最优顺序排列</li>`;
+      const extra = blockExtra ? `另有 ${blockExtra} 项前置一起做 · ` : "";
+      stepsHtml += `<li class="step-group"><b>已挂号 ${blockTicketed} 项</b>${extra}组内按最优顺序排列</li>`;
     }
     if (split > 0 && i === split) {
-      stepsHtml += `<li class="step-group rest"><b>未挂号 ${steps.length - split} 项</b>接着从此刻起单独优化</li>`;
+      const restCount = steps.length - split;
+      const restSteps = steps.slice(split);
+      const restTicketed = restSteps.filter((s) => s.ticket).length;
+      const restMissed = restSteps.filter((s) => s.ticket && s.missed).length;
+      const label = restTicketed ? `其余 ${restCount} 项` : `未挂号 ${restCount} 项`;
+      const hint = restTicketed
+        ? (restMissed
+            ? `其中 ${restTicketed} 项的号排不到最前，${restMissed} 项需现场重取`
+            : `其中 ${restTicketed} 项的号排不到最前，已按号安排在后面`)
+        : "接着从此刻起单独优化";
+      stepsHtml += `<li class="step-group rest"><b>${label}</b>${hint}</li>`;
     }
     stepsHtml += stepRow(s, i);
   });
@@ -976,13 +990,20 @@ function renderResult(d) {
     ? '<ul class="notes">' + d.notes.map((n) => "<li>" + esc(n) + "</li>").join("") + "</ul>"
     : "";
 
+  const ticketCount = steps.filter((s) => s.ticket).length;
+  const blockWarn = (split === 0 && ticketCount > 0)
+    ? '<div class="alert" style="margin-bottom:14px"><b>已挂号的项目排不到最前</b>' +
+      `把它们的号排在最前会让其他检查错过时间窗，已按最优顺序安排；具体原因见下方说明。</div>`
+    : "";
+
   box.innerHTML = `
     ${remindHtml}
     <div class="panel-head" style="margin-bottom:14px">
-      <h2>推荐路线（预估）</h2>${split > 0 ? `<span class="reorder-tag">已挂号 ${split} 项排在最前</span>` : ""}
+      <h2>推荐路线（预估）</h2>${split > 0 ? `<span class="reorder-tag">已挂号 ${blockTicketed} 项排在最前</span>` : ""}
       <span class="spacer"></span>
       <span class="hint">按医嘱生成，时间随队列变化</span>
     </div>
+    ${blockWarn}
 
     <div class="stat">
       <div class="big">${Math.round(d.total_minutes)}<small>分钟</small></div>

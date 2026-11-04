@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -42,17 +43,19 @@ def split_ticket_block(
     dependencies: Sequence,
     tickets: Dict[str, int],
     completed: Dict[str, float],
-) -> Tuple[List[str], List[Tuple[str, List[str]]]]:
-    """把已取号的项目切成「能排最前的一块」+「不得不降级的零头」。
+) -> Tuple[List[str], List[str]]:
+    """算出「已挂号块」：已取号的项目，加上必须一起做的前置。
 
     口径（与产品定义一致）：
 
-    * 号在手里、且它在待检列表里的前置也都挂了号 → 属于已挂号块。
-      块内顺序由求解器重新优化，但整块一定排在所有未挂号项目之前。
-    * 前置没挂号（例：挂了心脏彩超的号，但心电图还没挂）→ 物理上排不到最前，
-      降到后面的块。号仍然保留，按叫号时刻判断能不能赶上，赶不上就现场重取。
+    * 号在手里 → 属于已挂号块，块内顺序由求解器重新优化，整块排在未挂号项目之前。
+    * 它在待检列表里的前置没挂号（例：挂了生化全套的号，但血常规还没挂）→
+      **把前置拉进块里一起排在前面**，否则这个号根本用不上（生化要复用这次采血）。
+      拉进来的前置在界面上标成「前置，随挂号项一起做」。
 
-    返回 (块内编码列表, [(降级编码, 缺的前置编码列表), ...])。
+    注意：这里只处理"单子内还没做的前置"；已完成的前置（completed）不受影响。
+
+    返回 (块内编码列表, 被顺带拉进块的前置编码列表)。
     """
     in_plan = {e.code for e in exams}
     prereq: Dict[str, List[str]] = {}
@@ -61,17 +64,17 @@ def split_ticket_block(
             prereq.setdefault(dep.after, []).append(dep.before)
 
     block = {c for c in tickets if c in in_plan}
-    demoted: List[Tuple[str, List[str]]] = []
+    pulled: set[str] = set()
     changed = True
     while changed:
         changed = False
-        for code in sorted(block):
-            missing = [p for p in prereq.get(code, []) if p not in block and p not in completed]
-            if missing:
-                block.discard(code)
-                demoted.append((code, missing))
-                changed = True
-    return [e.code for e in exams if e.code in block], demoted
+        for code in list(block):
+            for pre in prereq.get(code, []):
+                if pre not in block and pre not in completed:
+                    block.add(pre)
+                    pulled.add(pre)
+                    changed = True
+    return [e.code for e in exams if e.code in block], [e.code for e in exams if e.code in pulled]
 
 
 def _prepare(
@@ -145,7 +148,7 @@ def _prepare(
     windows = _shift_windows(rules_mod.build_windows(), now.hour * 60 + now.minute)
 
     dependencies = rules_mod.build_dependencies()
-    block, demoted = split_ticket_block(exams, dependencies, clean_tickets, completed or {})
+    block, pulled = split_ticket_block(exams, dependencies, clean_tickets, completed or {})
 
     scheduler = ExamScheduler(
         exams,
@@ -158,7 +161,8 @@ def _prepare(
         travel_minutes=rules_mod.TRAVEL_MINUTES,
         ticket_block=block,
     )
-    scheduler.demoted_tickets = demoted      # 供 recommend 生成说明
+    scheduler.pulled_prereqs = pulled      # 供 recommend 生成说明
+    scheduler.ticket_codes = [e.code for e in exams if e.code in clean_tickets]
     return scheduler, None
 
 
@@ -225,6 +229,108 @@ def build_reminders(
     return out
 
 
+def _call_offset(scheduler: ExamScheduler, code: str) -> Optional[float]:
+    """该项目的号预计还要多久被叫到（相对快照，分钟）。"""
+    exam = next((e for e in scheduler.exams if e.code == code), None)
+    ticket = scheduler.tickets.get(code)
+    if exam is None or ticket is None:
+        return None
+    return scheduler.estimator.call_offset(exam.department, ticket)
+
+
+def _solve_with_block(
+    scheduler: ExamScheduler,
+    block: Sequence[str],
+    reference_order: Optional[Sequence[str]],
+    time_limit: float,
+):
+    """按指定的「已挂号块」求解一次。"""
+    scheduler.set_ticket_block(block)
+    return scheduler.solve(reference_order=reference_order, time_limit=time_limit)
+
+
+def solve_with_best_block(
+    scheduler: ExamScheduler,
+    reference_order: Optional[Sequence[str]] = None,
+    time_limit: float = rules_mod.SOLVER_TIME_LIMIT,
+    *,
+    ticket_codes: Optional[Sequence[str]] = None,
+    closure=None,
+):
+    """按「已挂号块优先」求解，块排不下时逐项降级。
+
+    为什么不能整块丢掉：只要块整体不可行就退回全局，会把**所有**已挂号项打散，
+    用户看到的现象就是"我挂了 7、9 号，路线还是从第 1 项开始"。真实原因往往只是
+    其中某一项的号叫得太晚，排在最前会占掉另一项的时间窗。
+
+    降级以**挂号项**为单位（而不是块内任意一项）：退掉一项后，只为它服务的前置
+    也一并退出块，避免出现"前置孤零零排在最前、挂号项却被挤到后面"。
+
+    降级顺序：
+      1. 先试「只退一项」，取「保留项最多、总时长最短」的方案；
+      2. 一项都救不回来，退掉叫号最晚的那项再来一轮；
+      3. 全退完仍不可行，才回到单一序列（dropped=True）。
+
+    返回 (plan, 因排不下而退出的挂号编码列表, 是否整块放弃)。
+    """
+    codes = list(
+        ticket_codes
+        if ticket_codes is not None
+        else getattr(scheduler, "ticket_codes", None) or list(scheduler.ticket_block)
+    )
+    block_of = (lambda cs: list(closure(cs))) if closure else (lambda cs: list(cs))
+
+    plan = _solve_with_block(scheduler, block_of(codes), reference_order, time_limit)
+    current = list(codes)
+    demoted: List[str] = []
+    dropped = False
+
+    if not plan.feasible and current:
+        deadline = time.perf_counter() + 3.0
+        while current and not plan.feasible and time.perf_counter() < deadline:
+            best = None
+            for cand in current:
+                trial = [c for c in current if c != cand]
+                trial_plan = _solve_with_block(
+                    scheduler, block_of(trial), reference_order, min(time_limit, 1.5)
+                )
+                if not trial_plan.feasible:
+                    continue
+                key = (len(trial), -trial_plan.total_minutes)
+                if best is None or key > best[0]:
+                    best = (key, cand, trial, trial_plan)
+            if best is not None:
+                _, cand, trial, trial_plan = best
+                plan = trial_plan
+                current = trial
+                demoted.append(cand)
+                break
+            # 单项都救不回来：先把叫号最晚的退掉，再试下一轮
+            latest = max(current, key=lambda c: _call_offset(scheduler, c) or 0.0)
+            current = [c for c in current if c != latest]
+            demoted.append(latest)
+            plan = _solve_with_block(
+                scheduler, block_of(current), reference_order, min(time_limit, 2.0)
+            )
+
+    if not plan.feasible:
+        scheduler.set_ticket_block(set())
+        plan = scheduler.solve(reference_order=reference_order, time_limit=time_limit)
+        dropped = plan.feasible
+    else:
+        scheduler.set_ticket_block(block_of(current))
+        # 试算过程中动过块，按最终块重算分段（只取前缀，不重解）
+        split = 0
+        for step in plan.steps:
+            if step.exam.code in scheduler.ticket_block:
+                split += 1
+            else:
+                break
+        plan.block_split = split
+
+    return plan, demoted, dropped
+
+
 def recommend(
     exam_codes: Sequence[str],
     *,
@@ -267,15 +373,19 @@ def recommend(
         return blocked
 
     assert scheduler is not None
-    plan = scheduler.solve(reference_order=reference_order, time_limit=time_limit)
 
-    # 兜底：已挂号块本身排不下（块的时段已过、块内互相卡死）才退回单一序列。
-    # 正常情况不会走到这里——降级已经在 _prepare 里按前置关系处理掉了。
-    block_dropped = False
-    if not plan.feasible and scheduler.ticket_block:
-        scheduler.set_ticket_block(set())
-        plan = scheduler.solve(reference_order=reference_order, time_limit=time_limit)
-        block_dropped = plan.feasible
+    # 块 = 挂号项 + 它们需要的、单子里还没做的前置；降级时以「挂号项」为单位重算块
+    dependencies = rules_mod.build_dependencies()
+
+    def closure(codes: Sequence[str]) -> List[str]:
+        return split_ticket_block(
+            scheduler.exams, dependencies, {c: 1 for c in codes}, completed or {}
+        )[0]
+
+    plan, demoted_unfit, block_dropped = solve_with_best_block(
+        scheduler, reference_order, time_limit,
+        ticket_codes=getattr(scheduler, "ticket_codes", None), closure=closure,
+    )
 
     if not plan.feasible:
         detail = _format_ticket_conflicts(scheduler, now)
@@ -293,14 +403,17 @@ def recommend(
 
         if scheduler.tickets:
             total = len(plan.steps)
+            block_tickets = sum(1 for c in scheduler.ticket_block if c in scheduler.tickets)
+            block_pre = len(scheduler.ticket_block) - block_tickets
             if block_dropped:
                 plan.notes.append(
-                    "已挂号的项目按号排不进最前（时段或前置条件不允许），"
+                    "已挂号的项目按号都排不进最前（时段或前置条件不允许），"
                     "方案退回全局最优；个别号可能作废，具体见下方提示"
                 )
             elif split and split < total:
+                extra = f"（另带 {block_pre} 项前置）" if block_pre else ""
                 plan.notes.append(
-                    f"已挂号的 {split} 项排在最前（组内按最优顺序重新排列），"
+                    f"已挂号的 {block_tickets} 项{extra}排在最前（组内按最优顺序重新排列），"
                     f"其余 {total - split} 项在其后单独优化"
                 )
             elif split and split == total:
@@ -309,18 +422,40 @@ def recommend(
                 "已按取号计算：各步开始时间由该号被叫到的时刻决定，"
                 "按时到场即可，早到只会站着多等"
             )
-            demoted = getattr(scheduler, "demoted_tickets", [])
-            if demoted and not block_dropped:
-                catalog = rules_mod.build_catalog()
-                names = "、".join(
-                    f"「{catalog[c].name}」（需先做{'、'.join(catalog[p].name for p in pre if p in catalog)}）"
-                    for c, pre in demoted
-                    if c in catalog
-                )
+            catalog = rules_mod.build_catalog()
+            pulled = [c for c in getattr(scheduler, "pulled_prereqs", [])
+                      if c in scheduler.ticket_block]
+            if pulled and not block_dropped:
+                names = "、".join(f"「{catalog[c].name}」" for c in pulled if c in catalog)
                 plan.notes.append(
-                    f"{names} 的前置检查还没挂号，无法排进已挂号块，只能放到后面；"
-                    f"做完前置再去本科室，号若已过现场重取即可"
+                    f"{names} 是已挂号项目的前置检查，还没挂号，但必须先做；"
+                    f"已把它一起排在最前，到场时现场取号即可"
                 )
+            if demoted_unfit and not block_dropped:
+                step_by_code = {s.exam.code: s for s in plan.steps}
+                for c in demoted_unfit:
+                    exam = catalog.get(c)
+                    if exam is None:
+                        continue
+                    step = step_by_code.get(c)
+                    call = _call_offset(scheduler, c) or 0
+                    head = (
+                        f"「{exam.name}」（{scheduler.tickets.get(c)} 号，"
+                        f"约 {_clock(now, call)} 叫到）"
+                    )
+                    if step is not None and step.missed:
+                        plan.notes.append(
+                            f"{head}排在最前会占掉其他检查的时间窗，只能排到 "
+                            f"{_clock(now, step.start_at)} 之后，届时号已过、需现场重新取号；"
+                            f"如果希望它排在最前，需要重取一个更早的号"
+                        )
+                    else:
+                        start_txt = _clock(now, step.start_at) if step is not None else "后面"
+                        tail = "；其余已挂号项仍在最前" if split else ""
+                        plan.notes.append(
+                            f"{head}排在最前会占掉其他检查的时间窗，已安排在 {start_txt} 前后，"
+                            f"赶得上号{tail}"
+                        )
 
     plan.notes.extend(_build_notes(plan, scheduler.exams, scheduler.estimator, scheduler.windows))
 

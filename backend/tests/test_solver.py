@@ -215,7 +215,8 @@ class TestTicketBlock(unittest.TestCase):
         self.assertTrue(plan.feasible)
         self.assertEqual(plan.order()[0], "B")
 
-    def test_split_block_demotes_dependent(self):
+    def test_split_block_pulls_prerequisite(self):
+        """已挂号项的前置没挂号时，把前置拉进块里，而不是把已挂号项踢出去。"""
         from backend.app.service import split_ticket_block
 
         exams = [
@@ -225,17 +226,63 @@ class TestTicketBlock(unittest.TestCase):
         ]
         deps = [Dependency("R1", "ECG", "ECHO", 10)]
 
-        block, demoted = split_ticket_block(exams, deps, {"ECHO": 30, "CBC": 40}, {})
-        self.assertEqual(block, ["CBC"])
-        self.assertEqual(demoted, [("ECHO", ["ECG"])])
+        block, pulled = split_ticket_block(exams, deps, {"ECHO": 30}, {})
+        self.assertEqual(set(block), {"ECG", "ECHO"})
+        self.assertEqual(pulled, ["ECG"])
 
-        block, demoted = split_ticket_block(exams, deps, {"ECHO": 30, "ECG": 40}, {})
-        self.assertEqual(block, ["ECG", "ECHO"])
-        self.assertEqual(demoted, [])
+        # 前置已经挂号 → 本来就都在块里
+        block, pulled = split_ticket_block(exams, deps, {"ECHO": 30, "ECG": 40}, {})
+        self.assertEqual(set(block), {"ECG", "ECHO"})
+        self.assertEqual(pulled, [])
 
-        # 前置已完成时不算缺
-        block, _ = split_ticket_block(exams, deps, {"ECHO": 30}, {"ECG": -5})
+        # 前置已完成 → 不用拉进来
+        block, pulled = split_ticket_block(exams, deps, {"ECHO": 30}, {"ECG": -5})
         self.assertEqual(block, ["ECHO"])
+        self.assertEqual(pulled, [])
+
+    def test_unfit_ticket_demoted_not_whole_block(self):
+        """块整体排不下时，只退掉挤占时间窗的那一项，不能把整块丢掉。"""
+        from backend.app.service import solve_with_best_block
+
+        exams = [
+            Exam("A", "A项", "甲", 10),
+            Exam("B", "B项", "乙", 10),
+            Exam("C", "C项", "丙", 10),
+        ]
+        # 当前叫到 100 号、人均 5 分钟：A（120 号）= +100 分钟，B（122 号）= +110 分钟
+        # C 的时间窗只到 +120 —— A、B 都排最前会把 C 挤出窗
+        states = [
+            DepartmentState(d, 0, 0, serving_no=100, service_minutes=5)
+            for d in ("甲", "乙", "丙")
+        ]
+        sched = ExamScheduler(
+            exams, [], [TimeWindow("W", "C", 0, 120)], QueueEstimator(states),
+            tickets={"A": 120, "B": 122}, ticket_block=["A", "B"],
+            travel_minutes=4,
+        )
+
+        plan, demoted, dropped = solve_with_best_block(sched)
+        self.assertTrue(plan.feasible)
+        self.assertFalse(dropped)
+        self.assertEqual(len(demoted), 1)
+        self.assertEqual(plan.block_split, 1, "应保留一项已挂号项在最前")
+        self.assertEqual(plan.order()[0], "A")
+        self.assertNotEqual(plan.order()[0], demoted[0])
+
+    def test_block_kept_when_feasible(self):
+        from backend.app.service import solve_with_best_block
+
+        exams = [Exam("A", "A项", "甲", 5), Exam("B", "B项", "乙", 5)]
+        states = [
+            DepartmentState(d, 0, 10, serving_no=100, service_minutes=5)
+            for d in ("甲", "乙")
+        ]
+        sched = ExamScheduler(exams, [], [], QueueEstimator(states),
+                              tickets={"A": 130, "B": 132}, ticket_block=["A", "B"])
+        plan, demoted, dropped = solve_with_best_block(sched)
+        self.assertTrue(plan.feasible)
+        self.assertEqual(demoted, [])
+        self.assertEqual(plan.block_split, 2)
 
 
 class TestGreedyCanFail(unittest.TestCase):
