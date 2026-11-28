@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "source": "检查项目前15项.pptx",
+  "exams": [
+    {
+      "code": "CBC",
+      "name": "血常规",
+      "catalog_status": "相关条目",
+      "catalog_entries": [
+        "血细胞分析（全血细胞计数＋五分类）",
+        "血细胞分析五分类＋CRP[复]"
+      ],
+      "department": null,
+      "service_minutes": null,
+      "source_slide": 2
+    },
+    {
+      "code": "FLU",
+      "name": "流感检测",
+      "catalog_status": "检测方法待确认",
+      "catalog_entries": [
+        "甲乙型流感病毒快速核酸检测二项[复]",
+        "含甲乙流的核酸组合"
+      ],
+      "department": null,
+      "service_minutes": null,
+      "source_slide": 2
+    },
+    {
+      "code": "CXR",
+      "name": "胸部正位",
+      "catalog_status": "自助目录未见",
+      "catalog_entries": [],
+      "department": null,
+      "service_minutes": null,
+      "source_slide": 2
+    },
+    {
+      "code": "MP_CP",
+      "name": "肺炎支原体衣原体",
+      "catalog_status": "检测方法待确认",
+      "catalog_entries": [
+        "肺炎支原体快速核酸检测[复]",
+        "呼吸道核酸三项（支原体衣原体腺病毒）[复]"
+      ],
+      "department": null,
+      "service_minutes": null,
+      "source_slide": 2
+    },
+    {
+      "code": "US_SINGLE",
+      "name": "单部位彩超",
+      "catalog_status": "部位待确认",
+      "catalog_entries": [
+        "腹部（含肝胆胰脾）",
+        "泌尿系（含肾、输尿管、膀胱）",
+        "泌尿系（含肾、输尿管、膀胱、前列腺，男性）",
+        "甲状腺及颈部淋巴结",
+        "双侧乳腺及引流区淋巴结"
+      ],
+      "department": null,
+      "service_minutes": null,
+      "source_slide": 2,
+      "variants": {
+        "abdomen": [
+          0
+        ],
+        "urinary": [
+          1,
+          2
+        ],
+        "thyroid": [
+          3
+        ],
+        "breast": [
+          4
+        ]
+      }
+    },
+    {
+      "code": "URINE",
+      "name": "尿常规（分析＋尿沉渣定量）[复]",
+      "catalog_status": "组合待确认",
+      "catalog_entries": [
+        "尿液分析",
+        "尿沉渣定量"
+      ],
+      "department": null,
+      "service_minutes": null,
+      "source_slide": 3
+    },
+    {
+      "code": "LIVER",
+      "name": "肝功",
+      "catalog_status": "相关条目",
+      "catalog_entries": [
+        "肝功十项[复]"
+      ],
+      "department": null,
+      "service_minutes": null,
+      "source_slide": 3
+    },
+    {
+      "code": "CARDIAC_ENZYMES",
+      "name": "心肌酶",
+      "catalog_status": "仅见相关单项",
+      "catalog_entries": [
+        "血清肌酸激酶测定",
+        "乳酸脱氢酶测定",
+        "血清α羟基丁酸脱氢酶测定",
+        "血清天门冬氨酸氨基转移酶测定"
+      ],
+      "department": null,
+      "service_minutes": null,
+      "source_slide": 3
+    },
+    {
+      "code": "STOOL",
+      "name": "粪常规",
+      "catalog_status": "相关条目",
+      "catalog_entries": [
+        "粪便常规"
+      ],
+      "department": null,
+      "service_minutes": null,
+      "source_slide": 3
+    },
+    {
+      "code": "RENAL",
+      "name": "肾功",
+      "catalog_status": "相关条目",
+      "catalog_entries": [
+        "肾功三项[复]"
+      ],
+      "department": null,
+      "service_minutes": null,
+      "source_slide": 3
+    },
+    {
+      "code": "COVID_AG",
+      "name": "新冠抗原检测[复]",
+      "catalog_status": "自助目录未见",
+      "catalog_entries": [],
+      "department": null,
+      "service_minutes": null,
+      "source_slide": 4
+    },
+    {
+      "code": "NOROVIRUS_AG",
+      "name": "诺如病毒抗原检测二项[复]",
+      "catalog_status": "自助目录未见",
+      "catalog_entries": [],
+      "department": null,
+      "service_minutes": null,
+      "source_slide": 4
+    },
+    {
+      "code": "PFT",
+      "name": "肺功检测",
+      "catalog_status": "自助目录未见",
+      "catalog_entries": [],
+      "department": null,
+      "service_minutes": null,
+      "source_slide": 4,
+      "variants": {
+        "ventilation": []
+      }
+    },
+    {
+      "code": "ELECTROLYTES",
+      "name": "电解质",
+      "catalog_status": "相关条目",
+      "catalog_entries": [
+        "电解质五项[复]"
+      ],
+      "department": null,
+      "service_minutes": null,
+      "source_slide": 4
+    },
+    {
+      "code": "ROTAVIRUS_AG",
+      "name": "人轮状病毒抗原测定",
+      "catalog_status": "自助目录未见",
+      "catalog_entries": [],
+      "department": null,
+      "service_minutes": null,
+      "source_slide": 4
+    }
+  ]
+}

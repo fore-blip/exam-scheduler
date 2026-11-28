@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>检查候选集测试</title>
+  <link rel="stylesheet" href="/candidates.css">
+  <script src="/candidates.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1 id="page-title">检查候选集</h1>
+      <p id="page-description">核对生理条件与前置规则，为当前可安排的检查列出候选顺序。</p>
+      <p><a id="switch-page" href="/optimize">打开 CP-SAT 优化</a> · <a href="/queues">查看实时模拟队列</a></p>
+    </header>
+    <form id="screening">
+      <section>
+        <h2>检查医嘱</h2>
+        <label for="exam">从目录添加</label>
+        <div class="row">
+          <select id="exam"><option value="">选择检查项目</option></select>
+          <button type="button" id="add">添加</button>
+        </div>
+        <label for="orders">医嘱编码</label>
+        <textarea id="orders" rows="2" placeholder="例如 EX01, EX05" required></textarea>
+        <button type="button" class="secondary" id="example">载入示例</button>
+        <div id="prerequisites" hidden>
+          <h3>已核实的前置记录</h3>
+          <div id="records"></div>
+        </div>
+      </section>
+      <section id="condition-panel" hidden>
+        <h2>需确认的检查条件</h2>
+        <div id="conditions" class="conditions"></div>
+      </section>
+      <div class="actions">
+        <button id="run" type="submit" disabled>生成候选集</button>
+        <span id="message" role="status"></span>
+      </div>
+    </form>
+    <section id="optimization" hidden aria-labelledby="optimization-title">
+      <h2 id="optimization-title">CP-SAT 优化结果</h2>
+      <p id="snapshot-label"></p>
+      <div id="optimal-route" class="optimal-route"></div>
+      <h2 id="enumerated-title">枚举路线与时间明细</h2>
+      <div id="timed-routes"></div>
+    </section>
+    <section id="outcome" hidden aria-labelledby="result-title">
+      <h2 id="result-title">候选顺序</h2>
+      <p id="sequence-summary"></p>
+      <ul id="dependencies"></ul>
+      <ol id="sequences"></ol>
+      <h2>被排除的完整医嘱顺序</h2>
+      <p id="rejected-summary"></p>
+      <ol id="rejected-sequences"></ol>
+      <h2>项目条件核对</h2>
+      <div id="results" class="results"></div>
+    </section>
+    <footer>规则草案演示 · 按当前状态筛选 · 适用于核对约束</footer>
+  </main>
+</body>
+</html>

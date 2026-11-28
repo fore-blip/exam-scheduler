@@ -1,0 +1,25 @@
+{
+  "rules": [
+    {
+      "rule_id": "EP-DEMO-01",
+      "before_exam_id": "EX01",
+      "after_exam_id": "EX06",
+      "recommended_gap_minutes": 10,
+      "note": "测试规则：同时开具两项时，血常规先于 HbA1c，建议间隔 10 分钟。"
+    },
+    {
+      "rule_id": "EP-DEMO-02",
+      "before_exam_id": "EX06",
+      "after_exam_id": "EX05",
+      "recommended_gap_minutes": 5,
+      "note": "测试规则：同时开具两项时，HbA1c 先于空腹血糖，建议间隔 5 分钟。"
+    },
+    {
+      "rule_id": "EP-DEMO-03",
+      "before_exam_id": "EX15",
+      "after_exam_id": "EX18",
+      "recommended_gap_minutes": null,
+      "note": "测试规则：同时开具两项时，肝胆超声先于膀胱超声，间隔待定。"
+    }
+  ]
+}
