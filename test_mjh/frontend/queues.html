@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>实时模拟队列</title>
+  <link rel="stylesheet" href="/candidates.css">
+  <script src="/queues.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>实时模拟队列</h1>
+      <p><a href="/">返回候选集</a></p>
+    </header>
+    <p id="queue-status" role="status">正在读取队列…</p>
+    <div id="queue-departments" class="results queue-departments"></div>
+    <section id="queue-controls" hidden>
+      <button id="call-next" type="button" disabled>叫下一号</button>
+      <p id="call-feedback" role="status"></p>
+    </section>
+  </main>
+</body>
+</html>

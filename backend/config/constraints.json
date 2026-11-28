@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "source": "检查项目前15项.pptx",
+  "missing_required_result_policy": "report_missing_prerequisite",
+  "required_results": [],
+  "mutex_groups": [],
+  "conditional_rules": [
+    {
+      "id": "ORDER-001",
+      "type": "precedence",
+      "status": "conditional_guidance",
+      "before": {
+        "condition": "fasting_required"
+      },
+      "after": {
+        "exam_code": "US_SINGLE",
+        "variant": "urinary",
+        "event": "begin_drinking_for_full_bladder"
+      },
+      "activation": "both_present",
+      "note": "同次有空腹项目和憋尿超声时，先完成空腹项目，再按指导饮水憋尿。"
+    },
+    {
+      "id": "ORDER-002",
+      "type": "precedence",
+      "status": "recommendation",
+      "before": {
+        "exam_code": "US_SINGLE",
+        "variant": "urinary",
+        "event": "finish_exam"
+      },
+      "after": {
+        "exam_code": "URINE",
+        "event": "collect_urine_sample"
+      },
+      "activation": "both_present",
+      "note": "同次做憋尿超声和尿检时，建议超声后排尿留样。"
+    },
+    {
+      "id": "PREP-001",
+      "type": "coordinate_blood_draw",
+      "status": "conditional_guidance",
+      "exam_codes": [
+        "CBC",
+        "LIVER",
+        "RENAL",
+        "ELECTROLYTES"
+      ],
+      "note": "按同次采血要求协调。PPT 未给出这些检查之间的固定顺序。"
+    }
+  ]
+}
